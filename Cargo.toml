@@ -1,0 +1,8 @@
+[package]
+name = "lurker"
+version = "0.1.0"
+authors = ["Bart Noordervliet <bart@noordervliet.net>"]
+
+[dependencies]
+yaml-rust = "0.3"
+regex = "0.2"
