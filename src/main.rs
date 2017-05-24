@@ -29,6 +29,7 @@ fn main() {
     ("TLS1.1 CLIENT_HELLO", r"^\x16....\x01...\x03\x02"),
     ("TLS1.2 CLIENT_HELLO", r"^\x16....\x01...\x03\x03")
   ];
+  let io_timeout = Duration::new(300, 0); // 5 minutes
 
   let mut file = File::open("config.yml").unwrap();
   let mut config_str = String::new();
@@ -81,6 +82,8 @@ fn main() {
         let server = TcpListener::bind(("0.0.0.0", portno as u16)).unwrap();
         for res in server.incoming() {
           let mut stream = res.unwrap();
+          stream.set_read_timeout(Some(io_timeout)).expect("Failed to set read timeout on TcpStream");
+          stream.set_write_timeout(Some(io_timeout)).expect("Failed to set write timeout on TcpStream");
           let addr = stream.peer_addr().unwrap();
           println!("CONNECT TCP {} from {}", portno, addr);
           let regexset = regexset.clone();
