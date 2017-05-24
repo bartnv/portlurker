@@ -2,11 +2,9 @@ general:
  print_ascii: true
  print_binary: false
 ports:
-# - tcp: 2022
-#   banner: "SSH-2.0-OpenSSH_6.7p1 Debian-5+deb8u3\r\n"
- - tcp: 2080
- - tcp: 2443
- - tcp: 2445
+ - tcp: 80
+ - tcp: 443
+ - tcp: 445
  - tcp: 3389
  - tcp: 16992
  - tcp: 16993
