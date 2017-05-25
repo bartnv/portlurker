@@ -65,7 +65,12 @@ fn main() {
     ("SMB1 NT_STATUS Success", r"^....\xffSMB.[\x00-\x0f]"),
     ("SMB1 NT_STATUS Information", r"^....\xffSMB.[\x40-\x4f]"),
     ("SMB1 NT_STATUS Warning", r"^....\xffSMB.[\x80-\x8f]"),
-    ("SMB1 NT_STATUS Error", r"^....\xffSMB.[\xc0-\xcf]")
+    ("SMB1 NT_STATUS Error", r"^....\xffSMB.[\xc0-\xcf]"),
+    ("SMB2 COMMAND NEGOTIATE", r"^\x00...\xfeSMB........\x00\x00"),
+    ("SMB2 NT_STATUS Success", r"^\x00...\xfeSMB....[\x00-\x0f]"),
+    ("SMB2 NT_STATUS Information", r"^\x00...\xfeSMB....[\x40-\x4f]"),
+    ("SMB2 NT_STATUS Warning", r"^\x00...\xfeSMB....[\x80-\x8f]"),
+    ("SMB2 NT_STATUS Error", r"^\x00...\xfeSMB....[\xc0-\xcf]")
   ];
   let io_timeout = Duration::new(300, 0); // 5 minutes
 
