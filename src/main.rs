@@ -17,6 +17,39 @@ struct App {
   print_binary: bool
 }
 
+fn to_hex(bytes: &[u8]) -> String {
+  let mut count = 0;
+  let mut result = String::with_capacity(66);
+  let mut dotline = String::with_capacity(18);
+
+  for byte in bytes.iter() {
+    if count != 0 && count%8 == 0 {
+      if count%16 == 0 {
+        dotline.push('\n');
+        result.push_str(&dotline);
+        result.reserve(33);
+        dotline.truncate(0);
+      }
+      else {
+        result.push(' ');
+        dotline.push(' ');
+      }
+    }
+    result.push_str(&format!("{:02X} ", byte));
+    if *byte > 31 && *byte < 127 { dotline.push(*byte as char) }
+    else if *byte == 0 { dotline.push('-'); }
+    else { dotline.push('.'); }
+    count += 1;
+  }
+  while count%16 != 0 {
+    if count%8 == 0 { result.push(' '); }
+    result.push_str("   ");
+    count += 1;
+  }
+  if dotline.len() != 0 { result.push_str(&dotline); }
+  result
+}
+
 fn main() {
   let mut app = App { print_ascii: false, print_binary: false };
   let binary_matches = [
@@ -59,7 +92,7 @@ fn main() {
   if !config["general"]["print_binary"].is_badvalue() {
     if config["general"]["print_binary"].as_bool().unwrap() {
       app.print_binary = true;
-      println!("Printing binary");
+      println!("Printing binary in hexadecimal");
     }
   }
   let app = app; // Revert to immutable
@@ -140,13 +173,11 @@ fn main() {
                       }
                     }
                     else { println!("! Read {} bytes of printable ascii", c); }
-                    if app.print_binary { println!("! {:?}", &buf[..c]); }
                   }
                   else {
                     println!("! Read {} bytes of binary", c);
-                    if app.print_binary { println!("! {:?}", &buf[..c]); }
                     for id in regexset.matches(&buf[..c]).into_iter() {
-                      println!("! Matches pattern {}", binary_matches[id].0);
+                      println!("^ Matches pattern {}", binary_matches[id].0);
                     }
                     for printable in printables {
                       if printable.len() > 3 {
@@ -155,6 +186,10 @@ fn main() {
                           println!("$ {}", line);
                         }
                       }
+                    }
+                    if app.print_binary {
+                      let hex = to_hex(&buf[..c]);
+                      for line in hex.lines() { println!(". {}", line); }
                     }
                   }
                 }
