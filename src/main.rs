@@ -27,7 +27,12 @@ fn main() {
     ("SSL3.0 CLIENT_HELLO", r"^\x16....\x01...\x03\x00"),
     ("TLS1.0 CLIENT_HELLO", r"^\x16....\x01...\x03\x01"),
     ("TLS1.1 CLIENT_HELLO", r"^\x16....\x01...\x03\x02"),
-    ("TLS1.2 CLIENT_HELLO", r"^\x16....\x01...\x03\x03")
+    ("TLS1.2 CLIENT_HELLO", r"^\x16....\x01...\x03\x03"),
+    ("SMB1 COMMAND NEGOTIATE", r"^....\xffSMB\x72"),
+    ("SMB1 NT_STATUS Success", r"^....\xffSMB.[\x00-\x0f]"),
+    ("SMB1 NT_STATUS Information", r"^....\xffSMB.[\x40-\x4f]"),
+    ("SMB1 NT_STATUS Warning", r"^....\xffSMB.[\x80-\x8f]"),
+    ("SMB1 NT_STATUS Error", r"^....\xffSMB.[\xc0-\xcf]")
   ];
   let io_timeout = Duration::new(300, 0); // 5 minutes
 
