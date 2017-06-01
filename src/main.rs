@@ -2,6 +2,7 @@ extern crate yaml_rust;
 extern crate regex;
 
 use std::fs::File;
+use std::io;
 use std::io::prelude::*;
 use std::net::TcpListener;
 use std::time::Duration;
@@ -19,21 +20,19 @@ struct App {
 
 fn to_hex(bytes: &[u8]) -> String {
   let mut count = 0;
-  let mut result = String::with_capacity(66);
+  let mut result = String::with_capacity(67);
   let mut dotline = String::with_capacity(18);
 
   for byte in bytes.iter() {
     if count != 0 && count%8 == 0 {
+      result.push(' ');
       if count%16 == 0 {
         dotline.push('\n');
         result.push_str(&dotline);
-        result.reserve(33);
+        result.reserve(67);
         dotline.truncate(0);
       }
-      else {
-        result.push(' ');
-        dotline.push(' ');
-      }
+      else { dotline.push(' '); }
     }
     result.push_str(&format!("{:02X} ", byte));
     if *byte > 31 && *byte < 127 { dotline.push(*byte as char) }
@@ -140,7 +139,8 @@ fn main() {
                   }
                 }
                 Err(e) => {
-                  println!("WRITE ERROR TCP {} from {}: {}", portno, addr, e.to_string());
+                  if e.kind() == io::ErrorKind::WouldBlock { println!("WRITE TIMEOUT TCP {} from {}", portno, addr); }
+                  else { println!("WRITE ERROR TCP {} from {}: {}", portno, addr, e.to_string()); }
                   return;
                 }
               }
@@ -199,7 +199,8 @@ fn main() {
                   }
                 }
                 Err(e) => {
-                  println!("READ ERROR TCP {} from {}: {}", portno, addr, e.to_string());
+                  if e.kind() == io::ErrorKind::WouldBlock { println!("READ TIMEOUT TCP {} from {}", portno, addr); }
+                  else { println!("READ ERROR TCP {} from {}: {}", portno, addr, e.to_string()); }
                   break;
                 }
               }
