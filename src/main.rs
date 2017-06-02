@@ -69,7 +69,9 @@ fn main() {
     ("SMB2 NT_STATUS Success", r"^\x00...\xfeSMB....[\x00-\x0f]"),
     ("SMB2 NT_STATUS Information", r"^\x00...\xfeSMB....[\x40-\x4f]"),
     ("SMB2 NT_STATUS Warning", r"^\x00...\xfeSMB....[\x80-\x8f]"),
-    ("SMB2 NT_STATUS Error", r"^\x00...\xfeSMB....[\xc0-\xcf]")
+    ("SMB2 NT_STATUS Error", r"^\x00...\xfeSMB....[\xc0-\xcf]"),
+    ("MS-TDS PRELOGIN Request", r"^\x12\x01\x00.\x00\x00"),
+    ("MS-TDS LOGIN Requst", r"^\x10\x01\x00.\x00\x00")
   ];
   let io_timeout = Duration::new(300, 0); // 5 minutes
 
