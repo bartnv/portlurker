@@ -157,8 +157,10 @@ fn main() {
                   }
                   let mut printables = Vec::new();
                   let mut found = false;
+                  let mut mbfound = false;
+                  let mut mbstring = String::new();
                   let mut start = 0;
-                  for i in 0..buf.len() {
+                  for i in 0..c {
                     if (buf[i] > 31 && buf[i] < 127) || buf[i] == 10 || buf[i] == 13 {
                       if !found {
                         start = i;
@@ -167,11 +169,22 @@ fn main() {
                     }
                     else {
                       if found {
-                        printables.push(&buf[start..i]);
+                        if (i-start == 1) {
+                          if (start > 0) && (buf[start-1] == 0) {
+                            mbstring.push(buf[i-1] as char);
+                            if !mbfound { mbfound = true; }
+                          }
+                        }
+                        else { printables.push(&buf[start..i]); }
                         found = false;
+                      }
+                      else if mbfound {
+                        mbstring.push('\n');
+                        mbfound = false;
                       }
                     }
                   }
+                  if found { printables.push(&buf[start..c]); }
                   if printables.len() == 1 && printables[0].len() == c {
                     if app.print_ascii {
                       let data = String::from_utf8_lossy(printables[0]);
@@ -193,6 +206,9 @@ fn main() {
                           println!("$ {}", line);
                         }
                       }
+                    }
+                    for line in mbstring.lines() {
+                      if line.len() > 3 { println!("% {}", line); }
                     }
                     if app.print_binary {
                       let hex = to_hex(&buf[..c]);
