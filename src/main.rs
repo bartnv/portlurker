@@ -125,7 +125,10 @@ fn main() {
       thread::spawn(move || {
         let server = TcpListener::bind(("0.0.0.0", portno as u16)).unwrap();
         for res in server.incoming() {
-          let mut stream = res.unwrap();
+          let mut stream = match res {
+            Ok(stream) => stream,
+            Err(e) => { println!("ACCEPT ERROR TCP {}: {}", portno, e.to_string()); continue; }
+          };
           stream.set_read_timeout(Some(io_timeout)).expect("Failed to set read timeout on TcpStream");
           stream.set_write_timeout(Some(io_timeout)).expect("Failed to set write timeout on TcpStream");
           let addr = stream.peer_addr().unwrap();
