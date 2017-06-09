@@ -92,7 +92,7 @@ fn main() {
   if !config["general"]["print_ascii"].is_badvalue() {
     if config["general"]["print_ascii"].as_bool().unwrap() {
       app.print_ascii = true;
-      println!("Printing ascii");
+      println!("Printing ASCII);
     }
   }
   if !config["general"]["print_binary"].is_badvalue() {
@@ -129,8 +129,8 @@ fn main() {
             Ok(stream) => stream,
             Err(e) => { println!("ACCEPT ERROR TCP {}: {}", portno, e.to_string()); continue; }
           };
-          stream.set_read_timeout(Some(io_timeout)).expect("Failed to set read timeout on TcpStream");
-          stream.set_write_timeout(Some(io_timeout)).expect("Failed to set write timeout on TcpStream");
+          stream.set_read_timeout(Some(io_timeout)).expect("Failed to set read timeout on TCPStream");
+          stream.set_write_timeout(Some(io_timeout)).expect("Failed to set write timeout on TCPStream");
           let addr = stream.peer_addr().unwrap();
           println!("CONNECT TCP {} from {}", portno, addr);
           let regexset = regexset.clone();
@@ -195,7 +195,7 @@ fn main() {
                         println!("| {}", line);
                       }
                     }
-                    else { println!("! Read {} bytes of printable ascii", c); }
+                    else { println!("! Read {} bytes of printable ASCII", c); }
                   }
                   else {
                     println!("! Read {} bytes of binary", c);
