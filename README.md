@@ -2,7 +2,7 @@
 Port listener / honeypot in Rust with protocol guessing and safe string display
 
 ## Installation
-To start, first install the latest stable version of rustc & Cargo by following the instructions at: http://doc.crates.io/
+To start, first install the latest stable version of rustc & Cargo by following the instructions at: https://www.rustup.rs/
 
 Running `cargo build` will build the project and `cargo run` will run it - you may need to do this as root to enable access to lower ports.
 
