@@ -1,5 +1,5 @@
 [package]
-name = "lurker"
+name = "PortLurker"
 version = "0.1.0"
 authors = ["Bart Noordervliet <bart@noordervliet.net>"]
 
