@@ -13,6 +13,7 @@ use yaml_rust::YamlLoader;
 use regex::bytes::RegexSetBuilder;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+const AUTHORS: &'static str = env!("CARGO_PKG_AUTHORS");
 
 #[derive(Copy, Clone)]
 struct App {
@@ -53,7 +54,7 @@ fn to_hex(bytes: &[u8]) -> String {
 
 fn main() {
   println!("PortLurker v{}", VERSION);
-  println!("Developer: Bart Noordervlet (http://www.github.com/bartnv)");
+  println!("{}", AUTHORS);
   
   let mut app = App { print_ascii: false, print_binary: false };
   let binary_matches = [
