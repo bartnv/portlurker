@@ -12,6 +12,8 @@ use std::process::exit;
 use yaml_rust::YamlLoader;
 use regex::bytes::RegexSetBuilder;
 
+const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+
 #[derive(Copy, Clone)]
 struct App {
   print_ascii: bool,
@@ -50,6 +52,9 @@ fn to_hex(bytes: &[u8]) -> String {
 }
 
 fn main() {
+  println!("PortLurker v{}", VERSION);
+  println!("Developer: Bart Noordervlet (http://www.github.com/bartnv)");
+  
   let mut app = App { print_ascii: false, print_binary: false };
   let binary_matches = [
     ("SSL3.0 Record Protocol", r"^\x16\x03\x00..\x01"),
@@ -112,6 +117,8 @@ fn main() {
     .dot_matches_new_line(false)
     .build().unwrap();
 
+  println!("Starting listeners on the following ports:");
+  
   for port in config["ports"].as_vec().unwrap() {
     if !port["tcp"].is_badvalue() {
       let portno = port["tcp"].as_i64().unwrap();
