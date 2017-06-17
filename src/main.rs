@@ -53,7 +53,7 @@ fn to_hex(bytes: &[u8]) -> String {
 }
 
 fn main() {
-  println!("PortLurker v{}", VERSION);
+  println!("Portlurker v{}", VERSION);
   println!("{}", AUTHORS);
   
   let mut app = App { print_ascii: false, print_binary: false };
