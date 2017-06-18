@@ -55,6 +55,7 @@ fn to_hex(bytes: &[u8]) -> String {
 fn main() {
   println!("Portlurker v{}", VERSION);
   println!("{}", AUTHORS);
+  println!("-----------------------------------------");
   
   let mut app = App { print_ascii: false, print_binary: false };
   let binary_matches = [
@@ -100,7 +101,7 @@ fn main() {
   if !config["general"]["print_ascii"].is_badvalue() {
     if config["general"]["print_ascii"].as_bool().unwrap() {
       app.print_ascii = true;
-      println!("Printing ASCII);
+      println!("Printing ASCII");
     }
   }
   if !config["general"]["print_binary"].is_badvalue() {
@@ -120,7 +121,7 @@ fn main() {
     .dot_matches_new_line(false)
     .build().unwrap();
 
-  println!("Starting listeners on the following ports:");
+  println!("\nStarting listeners on the following ports:");
   
   for port in config["ports"].as_vec().unwrap() {
     if !port["tcp"].is_badvalue() {
