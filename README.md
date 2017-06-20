@@ -4,7 +4,7 @@ Port listener / honeypot in Rust with protocol guessing, safe string display and
 ## Installation
 To start, first install the latest stable version of rustc & Cargo by following the instructions at: https://www.rustup.rs/
 
-For SQLite logging support you will also need to run 'sudo apt-get install libsqlite3-dev'
+For SQLite logging support you will need to run 'sudo apt-get install libsqlite3-dev' - this is compulsory right now (sorry!)
 
 Running `cargo build` will build the project and `cargo run` will run it - you may need to run both commands as root for reasons of file permissions and to enable access to lower ports.
 
