@@ -1,5 +1,5 @@
 # portlurker
-Port listener / honeypot in Rust with protocol guessing and safe string display
+Port listener / honeypot in Rust with protocol guessing and safe string display and rudimentary SQLite logging
 
 ## Installation
 To start, first install the latest stable version of rustc & Cargo by following the instructions at: https://www.rustup.rs/
@@ -14,7 +14,7 @@ Configuration is done in the config.yml file, which as the extension hints at is
 The general section has subkeys for the different options you can set in the file. Current these are:
  - print_ascii (boolean): show printable ascii found in the received data
  - print_binary (boolean): show all received data as a series of integer byte values
- - sql_logging (boolean): enable logging to an sqlite3 database file (portlurker.sqlite)
+ - sql_logging (boolean): enable logging to an sqlite3 database file (portlurker.sqlite) - Fields available right now are: id, remoteip, remoteport & localport
 
 The ports section contains a list of listening-port specifications. Each item in the list is itself a key-value collection. At a minimum it should have either a "tcp" key (integer) or a "udp" key (integer). Additional keys can be:
  - banner (string): send this string to each new connection on the port (often you'll need to send carriage-return and linefeed after this string; you can do that in YAML by enclosing the string in double quotes and adding \r\n at the end)
