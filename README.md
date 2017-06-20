@@ -1,5 +1,5 @@
 # portlurker
-Port listener / honeypot in Rust with protocol guessing and safe string display and rudimentary SQLite logging
+Port listener / honeypot in Rust with protocol guessing, safe string display and rudimentary SQLite logging
 
 ## Installation
 To start, first install the latest stable version of rustc & Cargo by following the instructions at: https://www.rustup.rs/
