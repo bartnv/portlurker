@@ -117,7 +117,7 @@ fn main() {
     if config["general"]["sql_logging"].as_bool().unwrap() {
       app.sql_logging = true;
       println!("Logging events to portlurker.sqlite");
-      let conn = Connection::open("/etc/portlurker.sqlite").expect("Failed to open or create database!");
+      let conn = Connection::open("/etc/portlurker.sqlite").expect("Failed to open or create database! (Disk space? Permissions?");
       conn.execute("CREATE TABLE IF NOT EXISTS connections (
         id         INTEGER PRIMARY KEY,
         time       INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
