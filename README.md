@@ -19,7 +19,7 @@ The general section has subkeys for the different options you can set in the fil
 The ports section contains a list of listening-port specifications. Each item in the list is itself a key-value collection. At a minimum it should have either a "tcp" key (integer) or a "udp" key (integer). Additional keys can be:
  - banner (string): send this string to each new connection on the port (often you'll need to send carriage-return and linefeed after this string; you can do that in YAML by enclosing the string in double quotes and adding \r\n at the end)
 
-An very basic config might look like this:
+A very basic config might look like this:
 ```
 general:
  print_ascii: true
