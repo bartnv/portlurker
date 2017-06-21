@@ -87,7 +87,7 @@ fn main() {
   ];
   let io_timeout = Duration::new(300, 0); // 5 minutes
 
-  let mut file = File::open("config.yml").unwrap();
+  let mut file = File::open("config.yml").expect("Unable to open configuration file!");
   let mut config_str = String::new();
   file.read_to_string(&mut config_str).unwrap();
   let docs = YamlLoader::load_from_str(&config_str).unwrap();
@@ -117,14 +117,14 @@ fn main() {
     if config["general"]["sql_logging"].as_bool().unwrap() {
       app.sql_logging = true;
       println!("Logging events to portlurker.sqlite");
-      let conn = Connection::open("./portlurker.sqlite").unwrap();
+      let conn = Connection::open("/etc/portlurker.sqlite").expect("Failed to open or create database!");
       conn.execute("CREATE TABLE IF NOT EXISTS connections (
         id         INTEGER PRIMARY KEY,
         time       INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
         remoteip   TEXT NOT NULL,
         remoteport INTEGER NOT NULL,
         localport  INTEGER NOT NULL
-      )", &[]).unwrap();
+      )", &[]).expect("Failed to create table inside database!");
     }
   }
   let app = app; // Revert to immutable
@@ -177,7 +177,7 @@ fn main() {
             };
 
             let conn = Connection::open("./portlurker.sqlite").unwrap();
-            conn.execute("INSERT INTO connections (remoteip, remoteport, localport) VALUES (?1, ?2, ?3)", &[&newdbentry.remoteip, &newdbentry.remoteport, &newdbentry.localport]).unwrap();
+            conn.execute("INSERT INTO connections (remoteip, remoteport, localport) VALUES (?1, ?2, ?3)", &[&newdbentry.remoteip, &newdbentry.remoteport, &newdbentry.localport]).expect("Can't write new row into table!");
           }
 
           let regexset = regexset.clone();
