@@ -15,7 +15,6 @@ use regex::bytes::RegexSetBuilder;
 use rusqlite::Connection;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
-const AUTHORS: &'static str = env!("CARGO_PKG_AUTHORS");
 
 #[derive(Copy, Clone)]
 struct App {
@@ -56,8 +55,9 @@ fn to_hex(bytes: &[u8]) -> String {
 }
 
 fn main() {
+  let authorstring: String = str::replace(env!("CARGO_PKG_AUTHORS"), ":", "\n");
   println!("Portlurker v{}", VERSION);
-  println!("{}", AUTHORS);
+  println!("{}", authorstring);
   println!("-----------------------------------------");
   
   let mut app = App { print_ascii: false, print_binary: false, sql_logging: false };
