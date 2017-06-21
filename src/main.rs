@@ -120,6 +120,7 @@ fn main() {
       let conn = Connection::open("./portlurker.sqlite").unwrap();
       conn.execute("CREATE TABLE IF NOT EXISTS connections (
         id         INTEGER PRIMARY KEY,
+        time       INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
         remoteip   TEXT NOT NULL,
         remoteport INTEGER NOT NULL,
         localport  INTEGER NOT NULL
