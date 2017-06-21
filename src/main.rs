@@ -1,5 +1,6 @@
 extern crate yaml_rust;
 extern crate regex;
+extern crate rusqlite;
 
 use std::fs::File;
 use std::io;
@@ -11,14 +12,15 @@ use std::thread;
 use std::process::exit;
 use yaml_rust::YamlLoader;
 use regex::bytes::RegexSetBuilder;
+use rusqlite::Connection;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
-const AUTHORS: &'static str = env!("CARGO_PKG_AUTHORS");
 
 #[derive(Copy, Clone)]
 struct App {
   print_ascii: bool,
-  print_binary: bool
+  print_binary: bool,
+  sql_logging: bool
 }
 
 fn to_hex(bytes: &[u8]) -> String {
@@ -53,11 +55,12 @@ fn to_hex(bytes: &[u8]) -> String {
 }
 
 fn main() {
+  let authorstring: String = str::replace(env!("CARGO_PKG_AUTHORS"), ":", "\n");
   println!("Portlurker v{}", VERSION);
-  println!("{}", AUTHORS);
+  println!("{}", authorstring);
   println!("-----------------------------------------");
   
-  let mut app = App { print_ascii: false, print_binary: false };
+  let mut app = App { print_ascii: false, print_binary: false, sql_logging: false };
   let binary_matches = [
     ("SSL3.0 Record Protocol", r"^\x16\x03\x00..\x01"),
     ("TLS1.0 Record Protocol", r"^\x16\x03\x01..\x01"),
@@ -84,7 +87,7 @@ fn main() {
   ];
   let io_timeout = Duration::new(300, 0); // 5 minutes
 
-  let mut file = File::open("config.yml").unwrap();
+  let mut file = File::open("config.yml").expect("Unable to open configuration file!");
   let mut config_str = String::new();
   file.read_to_string(&mut config_str).unwrap();
   let docs = YamlLoader::load_from_str(&config_str).unwrap();
@@ -110,6 +113,20 @@ fn main() {
       println!("Printing binary in hexadecimal");
     }
   }
+  if !config["general"]["sql_logging"].is_badvalue() {
+    if config["general"]["sql_logging"].as_bool().unwrap() {
+      app.sql_logging = true;
+      println!("Logging events to portlurker.sqlite");
+      let conn = Connection::open("portlurker.sqlite").expect("Failed to open or create database! Check your permissions or disk space.");
+      conn.execute("CREATE TABLE IF NOT EXISTS connections (
+        id         INTEGER PRIMARY KEY,
+        time       INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        remoteip   TEXT NOT NULL,
+        remoteport INTEGER NOT NULL,
+        localport  INTEGER NOT NULL
+      )", &[]).expect("Failed to create table inside database!");
+    }
+  }
   let app = app; // Revert to immutable
 
   let mut patterns = Vec::with_capacity(binary_matches.len());
@@ -122,7 +139,7 @@ fn main() {
     .build().unwrap();
 
   println!("\nStarting listeners on the following ports:");
-  
+
   for port in config["ports"].as_vec().unwrap() {
     if !port["tcp"].is_badvalue() {
       let portno = port["tcp"].as_i64().unwrap();
@@ -144,6 +161,25 @@ fn main() {
           stream.set_write_timeout(Some(io_timeout)).expect("Failed to set write timeout on TcpStream");
           let addr = stream.peer_addr().unwrap();
           println!("CONNECT TCP {} from {}", portno, addr);
+
+          if app.sql_logging {
+            #[derive(Debug)]
+            struct LoggedConnection {
+              remoteip: String,
+              remoteport: u16,
+              localport: i64
+            }
+
+            let newdbentry = LoggedConnection {
+              remoteip: addr.ip().to_string(),
+              remoteport: addr.port(),
+              localport: portno
+            };
+
+            let conn = Connection::open("./portlurker.sqlite").unwrap();
+            conn.execute("INSERT INTO connections (remoteip, remoteport, localport) VALUES (?1, ?2, ?3)", &[&newdbentry.remoteip, &newdbentry.remoteport, &newdbentry.localport]).expect("Can't write new row into table!");
+          }
+
           let regexset = regexset.clone();
           let banner = banner.clone();
           thread::spawn(move || {
@@ -183,7 +219,7 @@ fn main() {
                     }
                     else {
                       if found {
-                        if (i-start == 1) {
+                        if i-start == 1 {
                           if (start > 0) && (buf[start-1] == 0) {
                             mbstring.push(buf[i-1] as char);
                             if !mbfound { mbfound = true; }

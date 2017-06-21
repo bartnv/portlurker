@@ -1,9 +1,11 @@
 [package]
 name = "portlurker"
-version = "0.1.0"
-authors = ["Bart Noordervliet <bart@noordervliet.net>"]
+version = "0.1.1"
+authors = ["Bart Noordervliet <bart@noordervliet.net>",
+           "Mark Pentler <mark@elmarko.org>"]
 licence = "MIT"
 
 [dependencies]
 yaml-rust = "0.3"
 regex = "0.2"
+rusqlite = "0.12.0"
