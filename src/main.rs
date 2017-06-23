@@ -82,14 +82,18 @@ fn main() {
     ("SMB2 NT_STATUS Error", r"^\x00...\xfeSMB....[\xc0-\xcf]"),
     ("MS-TDS PRELOGIN Request", r"^\x12\x01\x00.\x00\x00"),
     ("MS-TDS LOGIN Request", r"^\x10\x01\x00.\x00\x00"),
-    ("SOCKS5 NOAUTH Request", r"^\x05\x01\x00$"),
-    ("SOCKS5 NOAUTH,USER/PASS Request", r"^\x05\x02\x00\x02$")
+    ("SOCKS4 NOAUTH Request", r"^\x04\x01\x00\x50"),
+    ("SOCKS5 NOAUTH Request", r"^\x05\x01\x00$"), // Tested ok-ish
+    ("SOCKS5 USER/PASS Request", r"^\x05\x02\x00\x02$") // possibly broken
   ];
   let io_timeout = Duration::new(300, 0); // 5 minutes
 
-  let mut file = File::open("config.yml").expect("Unable to open configuration file!");
   let mut config_str = String::new();
-  file.read_to_string(&mut config_str).unwrap();
+  match File::open("config.yml") {
+      Ok(mut file)   => { file.read_to_string(&mut config_str).unwrap(); },
+      Err(err)  => panic!("Unable to open configuration file: {}", err),
+  }
+ 
   let docs = YamlLoader::load_from_str(&config_str).unwrap();
   let config = &docs[0];
   //println!("{:?}", config);
