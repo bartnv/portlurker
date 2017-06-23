@@ -90,8 +90,8 @@ fn main() {
 
   let mut config_str = String::new();
   match File::open("config.yml") {
-      Ok(mut file)   => { file.read_to_string(&mut config_str).unwrap(); },
-      Err(err)  => { println!("Unable to open configuration file: {}", err); exit(-1); },
+      Ok(mut file) => { file.read_to_string(&mut config_str).unwrap(); },
+      Err(err) => { println!("Unable to open configuration file: {}", err); exit(-1); },
   }
  
   let docs = YamlLoader::load_from_str(&config_str).unwrap();
@@ -121,14 +121,17 @@ fn main() {
     if config["general"]["sql_logging"].as_bool().unwrap() {
       app.sql_logging = true;
       println!("Logging events to portlurker.sqlite");
-      let conn = Connection::open("portlurker.sqlite").expect("Failed to open or create database! Check your permissions or disk space.");
-      conn.execute("CREATE TABLE IF NOT EXISTS connections (
-        id         INTEGER PRIMARY KEY,
-        time       INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-        remoteip   TEXT NOT NULL,
-        remoteport INTEGER NOT NULL,
-        localport  INTEGER NOT NULL
-      )", &[]).expect("Failed to create table inside database!");
+      match Connection::open("portlurker.sqlite") {
+        Ok(conn) => { conn.execute("CREATE TABLE IF NOT EXISTS connections (
+                      id         INTEGER PRIMARY KEY,
+                      time       INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                      remoteip   TEXT NOT NULL,
+                      remoteport INTEGER NOT NULL,
+                      localport  INTEGER NOT NULL
+                      )", &[]).expect("Failed to create table inside database! Logging may not function correctly!");
+        },
+        Err(err) => {println!("Failed to open or create database: {} - Continuing without logging", err); app.sql_logging = false;},
+      }
     }
   }
   let app = app; // Revert to immutable
@@ -180,8 +183,13 @@ fn main() {
               localport: portno
             };
 
-            let conn = Connection::open("./portlurker.sqlite").unwrap();
-            conn.execute("INSERT INTO connections (remoteip, remoteport, localport) VALUES (?1, ?2, ?3)", &[&newdbentry.remoteip, &newdbentry.remoteport, &newdbentry.localport]).expect("Can't write new row into table!");
+            match Connection::open("portlurker.sqlite2") {
+              Ok(conn) => { conn.execute("INSERT INTO connections (
+                            remoteip, remoteport, localport) VALUES (
+                            ?1, ?2, ?3&
+                            )", &[&newdbentry.remoteip, &newdbentry.remoteport, &newdbentry.localport]).expect("Can't write new row into table! Subsequent logging may also fail.");},
+              Err(err) => {println!("Failed to open database: {} - Continuing without logging", err); let mut app = app ; app.sql_logging = false;},
+            }
           }
 
           let regexset = regexset.clone();
