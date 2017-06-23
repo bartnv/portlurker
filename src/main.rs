@@ -94,8 +94,6 @@ fn main() {
       Err(err)  => { println!("Unable to open configuration file: {}", err); exit(-1); },
   }
  
-  
-
   let docs = YamlLoader::load_from_str(&config_str).unwrap();
   let config = &docs[0];
   //println!("{:?}", config);
