@@ -183,7 +183,7 @@ fn main() {
               localport: portno
             };
 
-            match Connection::open("portlurker.sqlite2") {
+            match Connection::open("portlurker.sqlite") {
               Ok(conn) => { conn.execute("INSERT INTO connections (
                             remoteip, remoteport, localport) VALUES (
                             ?1, ?2, ?3&
