@@ -91,9 +91,11 @@ fn main() {
   let mut config_str = String::new();
   match File::open("config.yml") {
       Ok(mut file)   => { file.read_to_string(&mut config_str).unwrap(); },
-      Err(err)  => panic!("Unable to open configuration file: {}", err),
+      Err(err)  => { println!("Unable to open configuration file: {}", err); exit(-1); },
   }
  
+  
+
   let docs = YamlLoader::load_from_str(&config_str).unwrap();
   let config = &docs[0];
   //println!("{:?}", config);
