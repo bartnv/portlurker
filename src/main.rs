@@ -186,7 +186,7 @@ fn main() {
             match Connection::open("portlurker.sqlite") {
               Ok(conn) => { conn.execute("INSERT INTO connections (
                             remoteip, remoteport, localport) VALUES (
-                            ?1, ?2, ?3&
+                            ?1, ?2, ?3
                             )", &[&newdbentry.remoteip, &newdbentry.remoteport, &newdbentry.localport]).expect("Can't write new row into table! Subsequent logging may also fail.");},
               Err(err) => {println!("Failed to open database: {} - Continuing without logging", err); let mut app = app ; app.sql_logging = false;},
             }
