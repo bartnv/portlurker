@@ -15,12 +15,44 @@ use regex::bytes::RegexSetBuilder;
 use rusqlite::Connection;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+const BINARY_MATCHES: [(&str, &str);23] = [ // Global array, so needs an explicit length
+  ("SSL3.0 Record Protocol", r"^\x16\x03\x00..\x01"),
+  ("TLS1.0 Record Protocol", r"^\x16\x03\x01..\x01"),
+  ("TLS1.1 Record Protocol", r"^\x16\x03\x02..\x01"),
+  ("TLS1.2 Record Protocol", r"^\x16\x03\x03..\x01"),
+  ("SSL3.0 CLIENT_HELLO", r"^\x16....\x01...\x03\x00"),
+  ("TLS1.0 CLIENT_HELLO", r"^\x16....\x01...\x03\x01"),
+  ("TLS1.1 CLIENT_HELLO", r"^\x16....\x01...\x03\x02"),
+  ("TLS1.2 CLIENT_HELLO", r"^\x16....\x01...\x03\x03"),
+  ("SMB1 COMMAND NEGOTIATE", r"^....\xffSMB\x72"),
+  ("SMB1 NT_STATUS Success", r"^....\xffSMB.[\x00-\x0f]"),
+  ("SMB1 NT_STATUS Information", r"^....\xffSMB.[\x40-\x4f]"),
+  ("SMB1 NT_STATUS Warning", r"^....\xffSMB.[\x80-\x8f]"),
+  ("SMB1 NT_STATUS Error", r"^....\xffSMB.[\xc0-\xcf]"),
+  ("SMB2 COMMAND NEGOTIATE", r"^\x00...\xfeSMB........\x00\x00"),
+  ("SMB2 NT_STATUS Success", r"^\x00...\xfeSMB....[\x00-\x0f]"),
+  ("SMB2 NT_STATUS Information", r"^\x00...\xfeSMB....[\x40-\x4f]"),
+  ("SMB2 NT_STATUS Warning", r"^\x00...\xfeSMB....[\x80-\x8f]"),
+  ("SMB2 NT_STATUS Error", r"^\x00...\xfeSMB....[\xc0-\xcf]"),
+  ("MS-TDS PRELOGIN Request", r"^\x12\x01\x00.\x00\x00"),
+  ("MS-TDS LOGIN Request", r"^\x10\x01\x00.\x00\x00"),
+  ("SOCKS4 NOAUTH Request", r"^\x04\x01\x00\x50"),
+  ("SOCKS5 NOAUTH Request", r"^\x05\x01\x00$"), // Tested ok-ish
+  ("SOCKS5 USER/PASS Request", r"^\x05\x02\x00\x02$") // possibly broken
+];
 
 #[derive(Copy, Clone)]
 struct App {
   print_ascii: bool,
   print_binary: bool,
   sql_logging: bool
+}
+
+#[derive(Debug)]
+struct LoggedConnection {
+  remoteip: String,
+  remoteport: u16,
+  localport: i64
 }
 
 fn to_hex(bytes: &[u8]) -> String {
@@ -54,46 +86,20 @@ fn to_hex(bytes: &[u8]) -> String {
   result
 }
 
-fn main() {
+fn setup() -> App {
   let authorstring: String = str::replace(env!("CARGO_PKG_AUTHORS"), ":", "\n");
   println!("Portlurker v{}", VERSION);
   println!("{}", authorstring);
   println!("-----------------------------------------");
-  
+
   let mut app = App { print_ascii: false, print_binary: false, sql_logging: false };
-  let binary_matches = [
-    ("SSL3.0 Record Protocol", r"^\x16\x03\x00..\x01"),
-    ("TLS1.0 Record Protocol", r"^\x16\x03\x01..\x01"),
-    ("TLS1.1 Record Protocol", r"^\x16\x03\x02..\x01"),
-    ("TLS1.2 Record Protocol", r"^\x16\x03\x03..\x01"),
-    ("SSL3.0 CLIENT_HELLO", r"^\x16....\x01...\x03\x00"),
-    ("TLS1.0 CLIENT_HELLO", r"^\x16....\x01...\x03\x01"),
-    ("TLS1.1 CLIENT_HELLO", r"^\x16....\x01...\x03\x02"),
-    ("TLS1.2 CLIENT_HELLO", r"^\x16....\x01...\x03\x03"),
-    ("SMB1 COMMAND NEGOTIATE", r"^....\xffSMB\x72"),
-    ("SMB1 NT_STATUS Success", r"^....\xffSMB.[\x00-\x0f]"),
-    ("SMB1 NT_STATUS Information", r"^....\xffSMB.[\x40-\x4f]"),
-    ("SMB1 NT_STATUS Warning", r"^....\xffSMB.[\x80-\x8f]"),
-    ("SMB1 NT_STATUS Error", r"^....\xffSMB.[\xc0-\xcf]"),
-    ("SMB2 COMMAND NEGOTIATE", r"^\x00...\xfeSMB........\x00\x00"),
-    ("SMB2 NT_STATUS Success", r"^\x00...\xfeSMB....[\x00-\x0f]"),
-    ("SMB2 NT_STATUS Information", r"^\x00...\xfeSMB....[\x40-\x4f]"),
-    ("SMB2 NT_STATUS Warning", r"^\x00...\xfeSMB....[\x80-\x8f]"),
-    ("SMB2 NT_STATUS Error", r"^\x00...\xfeSMB....[\xc0-\xcf]"),
-    ("MS-TDS PRELOGIN Request", r"^\x12\x01\x00.\x00\x00"),
-    ("MS-TDS LOGIN Request", r"^\x10\x01\x00.\x00\x00"),
-    ("SOCKS4 NOAUTH Request", r"^\x04\x01\x00\x50"),
-    ("SOCKS5 NOAUTH Request", r"^\x05\x01\x00$"), // Tested ok-ish
-    ("SOCKS5 USER/PASS Request", r"^\x05\x02\x00\x02$") // possibly broken
-  ];
-  let io_timeout = Duration::new(300, 0); // 5 minutes
 
   let mut config_str = String::new();
   match File::open("config.yml") {
       Ok(mut file) => { file.read_to_string(&mut config_str).unwrap(); },
-      Err(err) => { println!("Unable to open configuration file: {}", err); exit(-1); },
+      Err(e) => { println!("Unable to open configuration file: {}", e.to_string()); exit(-1); },
   }
- 
+
   let docs = YamlLoader::load_from_str(&config_str).unwrap();
   let config = &docs[0];
   //println!("{:?}", config);
@@ -134,19 +140,33 @@ fn main() {
       }
     }
   }
-  let app = app; // Revert to immutable
+  return app; // send our config to the main function
+}
 
-  let mut patterns = Vec::with_capacity(binary_matches.len());
-  for &(_, pattern) in binary_matches.into_iter() {
+fn main() {
+  let app: App = setup (); // Print initial UI stuff, then parse the config file, and store the config
+  let io_timeout = Duration::new(300, 0); // 5 minutes
+
+  let mut patterns = Vec::with_capacity(BINARY_MATCHES.len());
+  for &(_, pattern) in BINARY_MATCHES.into_iter() {
     patterns.push(pattern);
   }
-  let regexset = RegexSetBuilder::new(patterns)
+  let regexset = RegexSetBuilder::new(patterns) // add a trap for bad regex expressions here?
     .unicode(false)
     .dot_matches_new_line(false)
     .build().unwrap();
 
   println!("\nStarting listeners on the following ports:");
 
+  // Have to reload config file here - can we improve this?
+  let mut config_str = String::new();
+  match File::open("config.yml") {
+      Ok(mut file) => { file.read_to_string(&mut config_str).unwrap(); },
+      Err(e) => { println!("Unable to open configuration file: {}", e.to_string()); exit(-1); },
+  }
+
+  let docs = YamlLoader::load_from_str(&config_str).unwrap();
+  let config = &docs[0];
   for port in config["ports"].as_vec().unwrap() {
     if !port["tcp"].is_badvalue() {
       let portno = port["tcp"].as_i64().unwrap();
@@ -158,7 +178,7 @@ fn main() {
       }
       let regexset = regexset.clone();
       thread::spawn(move || {
-        let server = TcpListener::bind(("0.0.0.0", portno as u16)).unwrap();
+        let server = TcpListener::bind(("0.0.0.0", portno as u16)).expect("Port can't be bound (is it in use?)"); // Add more error checking here
         for res in server.incoming() {
           let mut stream = match res {
             Ok(stream) => stream,
@@ -170,13 +190,6 @@ fn main() {
           println!("CONNECT TCP {} from {}", portno, addr);
 
           if app.sql_logging {
-            #[derive(Debug)]
-            struct LoggedConnection {
-              remoteip: String,
-              remoteport: u16,
-              localport: i64
-            }
-
             let newdbentry = LoggedConnection {
               remoteip: addr.ip().to_string(),
               remoteport: addr.port(),
@@ -188,7 +201,7 @@ fn main() {
                             remoteip, remoteport, localport) VALUES (
                             ?1, ?2, ?3
                             )", &[&newdbentry.remoteip, &newdbentry.remoteport, &newdbentry.localport]).expect("Can't write new row into table! Subsequent logging may also fail.");},
-              Err(err) => {println!("Failed to open database: {} - Continuing without logging", err); let mut app = app ; app.sql_logging = false;},
+              Err(e) => {println!("Failed to open database: {} - Continuing without logging", e.to_string()); let mut app = app ; app.sql_logging = false;},
             }
           }
 
@@ -259,7 +272,7 @@ fn main() {
                   else {
                     println!("! Read {} bytes of binary", c);
                     for id in regexset.matches(&buf[..c]).into_iter() {
-                      println!("^ Matches pattern {}", binary_matches[id].0);
+                      println!("^ Matches pattern {}", BINARY_MATCHES[id].0);
                     }
                     for printable in printables {
                       if printable.len() > 3 {
