@@ -3,12 +3,9 @@ general:
  print_binary: false
  sql_logging: false
 ports:
- - tcp: 22
  - tcp: 80
-   banner: "smallhttpd v0.24"
  - tcp: 443
  - tcp: 445
- - tcp: 1080
  - tcp: 3389
  - tcp: 16992
  - tcp: 16993
