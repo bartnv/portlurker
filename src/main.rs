@@ -95,11 +95,12 @@ fn setup() -> App {
   let mut app = App { print_ascii: false, print_binary: false, sql_logging: false };
 
   let mut config_str = String::new();
-  match File::open("config.yml") {
-      Ok(mut file) => { file.read_to_string(&mut config_str).unwrap(); },
+  let mut file = match File::open("config.yml") {
+      Ok(file) => file,
       Err(e) => { println!("Unable to open configuration file: {}", e.to_string()); exit(-1); },
-  }
+  };
 
+  file.read_to_string(&mut config_str).unwrap();
   let docs = YamlLoader::load_from_str(&config_str).unwrap();
   let config = &docs[0];
   //println!("{:?}", config);
@@ -129,29 +130,30 @@ fn setup() -> App {
       println!("Logging events to portlurker.sqlite");
       match Connection::open("portlurker.sqlite") {
         Ok(conn) => { conn.execute("CREATE TABLE IF NOT EXISTS connections (
-                      id         INTEGER PRIMARY KEY,
-                      time       INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-                      remoteip   TEXT NOT NULL,
-                      remoteport INTEGER NOT NULL,
-                      localport  INTEGER NOT NULL
-                      )", &[]).expect("Failed to create table inside database! Logging may not function correctly!");
+                                    id         INTEGER PRIMARY KEY,
+                                    time       INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                                    remoteip   TEXT NOT NULL,
+                                    remoteport INTEGER NOT NULL,
+                                    localport  INTEGER NOT NULL
+                                  )", &[]).expect("Failed to create table inside database! Logging may not function correctly!"); },
+        Err(e) => {
+          println!("Failed to open or create database: {}\nContinuing without logging", e.to_string());
         },
-        Err(err) => {println!("Failed to open or create database: {} - Continuing without logging", err); app.sql_logging = false;},
-      }
+      };
     }
   }
   return app; // send our config to the main function
 }
 
 fn main() {
-  let app: App = setup (); // Print initial UI stuff, then parse the config file, and store the config
+  let app: App = setup(); // Print initial UI stuff, then parse the config file, and store the config
   let io_timeout = Duration::new(300, 0); // 5 minutes
 
   let mut patterns = Vec::with_capacity(BINARY_MATCHES.len());
   for &(_, pattern) in BINARY_MATCHES.into_iter() {
     patterns.push(pattern);
   }
-  let regexset = RegexSetBuilder::new(patterns) // add a trap for bad regex expressions here?
+  let regexset = RegexSetBuilder::new(patterns)
     .unicode(false)
     .dot_matches_new_line(false)
     .build().unwrap();
@@ -160,11 +162,12 @@ fn main() {
 
   // Have to reload config file here - can we improve this?
   let mut config_str = String::new();
-  match File::open("config.yml") {
-      Ok(mut file) => { file.read_to_string(&mut config_str).unwrap(); },
+  let mut file = match File::open("config.yml") {
+      Ok(file) => file,
       Err(e) => { println!("Unable to open configuration file: {}", e.to_string()); exit(-1); },
-  }
+  };
 
+  file.read_to_string(&mut config_str).unwrap();
   let docs = YamlLoader::load_from_str(&config_str).unwrap();
   let config = &docs[0];
   for port in config["ports"].as_vec().unwrap() {
@@ -198,10 +201,14 @@ fn main() {
 
             match Connection::open("portlurker.sqlite") {
               Ok(conn) => { conn.execute("INSERT INTO connections (
-                            remoteip, remoteport, localport) VALUES (
-                            ?1, ?2, ?3
-                            )", &[&newdbentry.remoteip, &newdbentry.remoteport, &newdbentry.localport]).expect("Can't write new row into table! Subsequent logging may also fail.");},
-              Err(e) => {println!("Failed to open database: {} - Continuing without logging", e.to_string()); let mut app = app ; app.sql_logging = false;},
+                              remoteip, remoteport, localport) VALUES (
+                              ?1, ?2, ?3)", &[&newdbentry.remoteip, &newdbentry.remoteport, &newdbentry.localport]
+                            ).expect("Can't write new row into table! Subsequent logging may also fail.");},
+              Err(e) => {
+                println!("Failed to open database: {} - Continuing without logging", e.to_string());
+                let mut app = app;
+                app.sql_logging = false;
+              },
             }
           }
 
