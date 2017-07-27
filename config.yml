@@ -1,6 +1,7 @@
 general:
  print_ascii: true
  print_binary: false
+ sql_logging: false
 ports:
  - tcp: 80
  - tcp: 443
