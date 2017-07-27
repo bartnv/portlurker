@@ -1,9 +1,9 @@
 [package]
 name = "portlurker"
 version = "0.1.2"
-authors = ["Bart Noordervliet <bart@noordervliet.net>",
+authors = ["Bart Noordervliet <bart@mmvi.nl>",
            "Mark Pentler <mark@elmarko.org>"]
-licence = "MIT"
+license = "MIT"
 
 [dependencies]
 yaml-rust = "0.3"
