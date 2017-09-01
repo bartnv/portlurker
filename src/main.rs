@@ -82,7 +82,10 @@ fn to_hex(bytes: &[u8]) -> String {
     result.push_str("   ");
     count += 1;
   }
-  if dotline.len() != 0 { result.push_str(&dotline); }
+  if dotline.len() != 0 {
+    result.push(' ');
+    result.push_str(&dotline);
+  }
   result
 }
 
