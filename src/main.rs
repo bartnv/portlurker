@@ -15,7 +15,7 @@ use regex::bytes::RegexSetBuilder;
 use rusqlite::Connection;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
-const BINARY_MATCHES: [(&str, &str);23] = [ // Global array, so needs an explicit length
+const BINARY_MATCHES: [(&str, &str);24] = [ // Global array, so needs an explicit length
   ("SSL3.0 Record Protocol", r"^\x16\x03\x00..\x01"),
   ("TLS1.0 Record Protocol", r"^\x16\x03\x01..\x01"),
   ("TLS1.1 Record Protocol", r"^\x16\x03\x02..\x01"),
@@ -38,7 +38,8 @@ const BINARY_MATCHES: [(&str, &str);23] = [ // Global array, so needs an explici
   ("MS-TDS LOGIN Request", r"^\x10\x01\x00.\x00\x00"),
   ("SOCKS4 NOAUTH Request", r"^\x04\x01\x00\x50"),
   ("SOCKS5 NOAUTH Request", r"^\x05\x01\x00$"), // Tested ok-ish
-  ("SOCKS5 USER/PASS Request", r"^\x05\x02\x00\x02$") // possibly broken
+  ("SOCKS5 USER/PASS Request", r"^\x05\x02\x00\x02$"), // possibly broken
+  ("Bitcoin main chain magic number", r"\xf9\xbe\xb4\xd9")
 ];
 
 #[derive(Copy, Clone)]
