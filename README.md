@@ -6,6 +6,8 @@ To start, first install the latest stable version of rustc & Cargo by following 
 
 For SQLite logging support you will need to run 'sudo apt-get install libsqlite3-dev' - this is compulsory right now (sorry!) but is disabled by default.
 
+You'll also need to rename the config file to remove the -default suffix. This was done to prevent overwriting of config files when upgrading.
+
 Running `cargo build` will build the project and `cargo run` will run it - you may need to execute these commands as root for reasons of file permissions and to enable access to lower ports.
 
 ## Configuration
