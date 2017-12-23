@@ -130,10 +130,10 @@ fn setup() -> App {
   }
   if !config["general"]["sql_logging"].is_badvalue() {
     if config["general"]["sql_logging"].as_bool().unwrap() {
-      app.sql_logging = true;
       println!("Logging events to portlurker.sqlite");
       match Connection::open("portlurker.sqlite") {
-        Ok(conn) => { conn.execute("CREATE TABLE IF NOT EXISTS connections (
+        Ok(conn) => { app.sql_logging = true;
+                      conn.execute("CREATE TABLE IF NOT EXISTS connections (
                                     id         INTEGER PRIMARY KEY,
                                     time       INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
                                     remoteip   TEXT NOT NULL,
