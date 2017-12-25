@@ -1,8 +1,10 @@
 extern crate yaml_rust;
 extern crate regex;
 extern crate rusqlite;
+extern crate chrono;
 
 use std::fs::File;
+use std::fs::OpenOptions;
 use std::io;
 use std::io::prelude::*;
 use std::net::TcpListener;
@@ -13,6 +15,7 @@ use std::process::exit;
 use yaml_rust::YamlLoader;
 use regex::bytes::RegexSetBuilder;
 use rusqlite::Connection;
+use chrono::Local;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 const BINARY_MATCHES: [(&str, &str);24] = [ // Global array, so needs an explicit length
@@ -46,7 +49,8 @@ const BINARY_MATCHES: [(&str, &str);24] = [ // Global array, so needs an explici
 struct App {
   print_ascii: bool,
   print_binary: bool,
-  sql_logging: bool
+  sql_logging: bool,
+  file_logging: bool
 }
 
 #[derive(Debug)]
@@ -54,6 +58,15 @@ struct LoggedConnection {
   remoteip: String,
   remoteport: u16,
   localport: i64
+}
+
+fn log_to_file(msg: String) {
+  let mut file = OpenOptions::new()
+              .append(true)
+              .create(true)
+              .open("portlurker.log").expect("Failed to open local log file for writing");;
+  writeln!(file, "{}", msg).unwrap();
+  
 }
 
 fn to_hex(bytes: &[u8]) -> String {
@@ -96,7 +109,7 @@ fn setup() -> App {
   println!("{}", authorstring);
   println!("-----------------------------------------");
 
-  let mut app = App { print_ascii: false, print_binary: false, sql_logging: false };
+  let mut app = App { print_ascii: false, print_binary: false, sql_logging: false, file_logging: false };
 
   let mut config_str = String::new();
   let mut file = match File::open("config.yml") {
@@ -128,11 +141,18 @@ fn setup() -> App {
       println!("Printing binary in hexadecimal");
     }
   }
+  if !config["general"]["file_logging"].is_badvalue() {
+    if config["general"]["file_logging"].as_bool().unwrap() {
+      app.file_logging = true;
+      println!("Logging to local text file");
+    }
+  }
   if !config["general"]["sql_logging"].is_badvalue() {
     if config["general"]["sql_logging"].as_bool().unwrap() {
       println!("Logging events to portlurker.sqlite");
       match Connection::open("portlurker.sqlite") {
         Ok(conn) => { app.sql_logging = true;
+                      println!("Logging to local SQL database file");
                       conn.execute("CREATE TABLE IF NOT EXISTS connections (
                                     id         INTEGER PRIMARY KEY,
                                     time       INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
@@ -194,15 +214,21 @@ fn main() {
           stream.set_read_timeout(Some(io_timeout)).expect("Failed to set read timeout on TcpStream");
           stream.set_write_timeout(Some(io_timeout)).expect("Failed to set write timeout on TcpStream");
           let addr = stream.peer_addr().unwrap();
-          println!("CONNECT TCP {} from {}", portno, addr);
 
+          let current_time = Local::now();
+          let formatted_time = format!("{}", current_time.format("%a %d %b %Y - %H:%M.%S"));
+
+          let log_msg = format!("[{}]: CONNECT TCP {} from {}", formatted_time, portno, addr);
+          println!("{}", log_msg);
+          if app.file_logging {
+            log_to_file(log_msg.to_string());
+          }
           if app.sql_logging {
             let newdbentry = LoggedConnection {
               remoteip: addr.ip().to_string(),
               remoteport: addr.port(),
               localport: portno
             };
-
             match Connection::open("portlurker.sqlite") {
               Ok(conn) => { conn.execute("INSERT INTO connections (
                               remoteip, remoteport, localport) VALUES (
