@@ -149,10 +149,9 @@ fn setup() -> App {
   }
   if !config["general"]["sql_logging"].is_badvalue() {
     if config["general"]["sql_logging"].as_bool().unwrap() {
-      println!("Logging events to portlurker.sqlite");
       match Connection::open("portlurker.sqlite") {
         Ok(conn) => { app.sql_logging = true;
-                      println!("Logging to local SQL database file");
+                      println!("Logging to local SQL database file portlurker.sqlite");
                       conn.execute("CREATE TABLE IF NOT EXISTS connections (
                                     id         INTEGER PRIMARY KEY,
                                     time       INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
@@ -161,7 +160,7 @@ fn setup() -> App {
                                     localport  INTEGER NOT NULL
                                   )", &[]).expect("Failed to create table inside database! Logging may not function correctly!"); },
         Err(e) => {
-          println!("Failed to open or create database: {}\nContinuing without logging", e.to_string());
+          println!("Enabling SQL logging failed because it was not possible to open or create the database: {}\nContinuing without SQL logging", e.to_string());
         },
       };
     }
