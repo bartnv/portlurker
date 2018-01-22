@@ -16,7 +16,8 @@ Configuration is done in the config.yml file, which as the extension hints at is
 The general section has subkeys for the different options you can set in the file. Currently these are:
  - print_ascii (boolean): show printable ascii found in the received data
  - print_binary (boolean): show all received data as a series of integer byte values
- - sql_logging (boolean): enable logging to an sqlite3 database file (portlurker.sqlite) - Fields available right now are: id, time (since UNIX epoch), remoteip, remoteport & localport
+ - sql_logging (boolean): enable logging to an sqlite3 database file (portlurker.sqlite) - Fields available right now are: id, time (since UNIX epoch), remoteip, remoteport & localport. Connections are logged, but not disconnections.
+ - file_logging (boolean): enable logging to a local text file (portlurker.log). As with SQL logging only connections are logged, not disconnections.
 
 The ports section contains a list of listening-port specifications. Each item in the list is itself a key-value collection. At a minimum it should have either a "tcp" key (integer) or a "udp" key (integer). Additional keys can be:
  - banner (string): send this string to each new connection on the port (often you'll need to send carriage-return and linefeed after this string; you can do that in YAML by enclosing the string in double quotes and adding \r\n at the end)
@@ -27,6 +28,7 @@ general:
  print_ascii: true
  print_binary: false
  sql_logging: true
+ file_logging: false
 ports:
  - tcp: 22
    banner: "SSH-2.0-OpenSSH_6.7p1 Debian-5+deb8u3\r\n"
