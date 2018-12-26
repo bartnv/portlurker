@@ -10,7 +10,7 @@ use std::fs::File;
 use std::fs::OpenOptions;
 use std::io;
 use std::io::prelude::*;
-use std::net::TcpListener;
+use std::net::{TcpListener, IpAddr};
 use std::time::Duration;
 use std::sync::Arc;
 use std::thread;
@@ -390,7 +390,7 @@ fn nfq_callback(msg: &nfqueue::Message, state: &mut State) {
      Some(h) => match h.get_next_level_protocol() {
        IpNextHeaderProtocols::Tcp => match TcpPacket::new(h.payload()) {
          Some(p) => {
-           if !state.ports.contains(&p.get_destination()) { println!("TCP SYN to unmonitored port {}", p.get_destination()) }
+           if !state.ports.contains(&p.get_destination()) { println!("TCP SYN from {} to unmonitored port {}", IpAddr::V4(h.get_destination()), p.get_destination()) }
          },
          None => println!("Received malformed TCP packet")
        },
