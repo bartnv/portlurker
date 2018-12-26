@@ -2,6 +2,9 @@ extern crate yaml_rust;
 extern crate regex;
 extern crate rusqlite;
 extern crate chrono;
+extern crate libc;
+extern crate nfqueue;
+extern crate pnet;
 
 use std::fs::File;
 use std::fs::OpenOptions;
@@ -15,7 +18,12 @@ use std::process::exit;
 use yaml_rust::YamlLoader;
 use regex::bytes::RegexSetBuilder;
 use rusqlite::Connection;
+use rusqlite::types::ToSql;
 use chrono::Local;
+use pnet::packet::ip::IpNextHeaderProtocols;
+use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::tcp::TcpPacket;
+use pnet::packet::Packet;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 const BINARY_MATCHES: [(&str, &str);24] = [ // Global array, so needs an explicit length
@@ -66,7 +74,7 @@ fn log_to_file(msg: String) {
               .create(true)
               .open("portlurker.log").expect("Failed to open local log file for writing");;
   writeln!(file, "{}", msg).unwrap();
-  
+
 }
 
 fn to_hex(bytes: &[u8]) -> String {
@@ -158,7 +166,7 @@ fn setup() -> App {
                                     remoteip   TEXT NOT NULL,
                                     remoteport INTEGER NOT NULL,
                                     localport  INTEGER NOT NULL
-                                  )", &[]).expect("Failed to create table inside database! Logging may not function correctly!"); },
+                                  )", rusqlite::NO_PARAMS).expect("Failed to create table inside database! Logging may not function correctly!"); },
         Err(e) => {
           println!("Enabling SQL logging failed because it was not possible to open or create the database: {}\nContinuing without SQL logging", e.to_string());
         },
@@ -193,9 +201,11 @@ fn main() {
   file.read_to_string(&mut config_str).unwrap();
   let docs = YamlLoader::load_from_str(&config_str).unwrap();
   let config = &docs[0];
+  let mut tcp_ports: Vec<u16> = vec![];
   for port in config["ports"].as_vec().unwrap() {
     if !port["tcp"].is_badvalue() {
       let portno = port["tcp"].as_i64().unwrap();
+      tcp_ports.push(portno as u16);
       println!("TCP port {}", portno);
       let mut banner = Arc::new(String::new());
       if let Some(x) = port["banner"].as_str() {
@@ -231,7 +241,7 @@ fn main() {
             match Connection::open("portlurker.sqlite") {
               Ok(conn) => { conn.execute("INSERT INTO connections (
                               remoteip, remoteport, localport) VALUES (
-                              ?1, ?2, ?3)", &[&newdbentry.remoteip, &newdbentry.remoteport, &newdbentry.localport]
+                              ?1, ?2, ?3)", &[&newdbentry.remoteip as &ToSql, &newdbentry.remoteport, &newdbentry.localport]
                             ).expect("Can't write new row into table! Subsequent logging may also fail.");},
               Err(e) => {
                 println!("Failed to open database: {} - Continuing without logging", e.to_string());
@@ -358,5 +368,45 @@ fn main() {
     }
   }
 
-  loop { thread::sleep(Duration::new(60, 0)); }
+  let mut state = State::new();
+  state.ports = tcp_ports.clone();
+  let mut q = nfqueue::Queue::new(state);
+  q.open();
+  q.unbind(libc::AF_INET);
+
+  let rc = q.bind(libc::AF_INET);
+  assert!(rc == 0);
+
+  q.create_queue(0, nfq_callback);
+  q.set_mode(nfqueue::CopyMode::CopyPacket, 0xffff);
+
+  q.run_loop(); // Infinite loop
+  q.close();
+}
+
+fn nfq_callback(msg: &nfqueue::Message, state: &mut State) {
+   let header = Ipv4Packet::new(msg.get_payload());
+   match header {
+     Some(h) => match h.get_next_level_protocol() {
+       IpNextHeaderProtocols::Tcp => match TcpPacket::new(h.payload()) {
+         Some(p) => {
+           if !state.ports.contains(&p.get_destination()) { println!("TCP SYN to unmonitored port {}", p.get_destination()) }
+         },
+         None => println!("Received malformed TCP packet")
+       },
+       _ => println!("Received a non-TCP packet")
+     },
+     None => println!("Received malformed IPv4 packet")
+   }
+
+   msg.set_verdict(nfqueue::Verdict::Accept);
+}
+
+struct State {
+    ports: Vec<u16>
+}
+impl State {
+    pub fn new() -> State {
+        State { ports: vec![] }
+    }
 }

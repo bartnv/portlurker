@@ -6,7 +6,10 @@ authors = ["Bart Noordervliet <bart@mmvi.nl>",
 license = "MIT"
 
 [dependencies]
-yaml-rust = "0.3"
-regex = "0.2"
-rusqlite = "0.12.0"
-chrono = "0.4.0"
+yaml-rust = "0.4"
+regex = "1"
+rusqlite = "0.16"
+chrono = "0.4"
+nfqueue = "0.9"
+libc = "0.2"
+pnet = "0.21"
