@@ -390,7 +390,7 @@ fn nfq_callback(msg: &nfqueue::Message, state: &mut State) {
      Some(h) => match h.get_next_level_protocol() {
        IpNextHeaderProtocols::Tcp => match TcpPacket::new(h.payload()) {
          Some(p) => {
-           if !state.ports.contains(&p.get_destination()) { println!("TCP SYN from {} to unmonitored port {}", IpAddr::V4(h.get_destination()), p.get_destination()) }
+           if !state.ports.contains(&p.get_destination()) { println!("TCP SYN from {} to unmonitored port {}", IpAddr::V4(h.get_source()), p.get_destination()) }
          },
          None => println!("Received malformed TCP packet")
        },
