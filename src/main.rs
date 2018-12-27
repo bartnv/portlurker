@@ -210,7 +210,7 @@ fn main() {
       let mut banner = Arc::new(String::new());
       if let Some(x) = port["banner"].as_str() {
         Arc::get_mut(& mut banner).unwrap().push_str(x);
-        println!("  with banner: {}", *banner);
+        println!("  with banner: {}", to_hex(x.as_bytes()));
       }
       let regexset = regexset.clone();
       thread::spawn(move || {
@@ -256,11 +256,7 @@ fn main() {
           thread::spawn(move || {
             if banner.len() > 0 {
               match stream.write((*banner).as_bytes()) {
-                Ok(_) => {
-                  for line in (*banner).lines() {
-                    println!("> {}", line);
-                  }
-                }
+                Ok(_) => println!("> <banner>"),
                 Err(e) => {
                   if e.kind() == io::ErrorKind::WouldBlock { println!("WRITE TIMEOUT TCP {} from {}", portno, addr); }
                   else { println!("WRITE ERROR TCP {} from {}: {}", portno, addr, e.to_string()); }
