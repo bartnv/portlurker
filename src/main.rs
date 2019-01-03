@@ -179,6 +179,7 @@ fn setup() -> App {
 fn main() {
   let app: App = setup(); // Print initial UI stuff, then parse the config file, and store the config
   let io_timeout = Duration::new(300, 0); // 5 minutes
+  let bind_ip;
 
   let mut patterns = Vec::with_capacity(BINARY_MATCHES.len());
   for &(_, pattern) in BINARY_MATCHES.into_iter() {
@@ -201,6 +202,13 @@ fn main() {
   file.read_to_string(&mut config_str).unwrap();
   let docs = YamlLoader::load_from_str(&config_str).unwrap();
   let config = &docs[0];
+
+  if !config["general"]["bind_ip"].is_badvalue() {
+    bind_ip = config["general"]["bind_ip"].as_str().expect("Configuration item 'bind_ip' is not valid").to_string();
+    println!("Binding to external IP {}", bind_ip);
+  }
+  else { bind_ip = String::from("0.0.0.0"); }
+
   let mut tcp_ports: Vec<u16> = vec![];
   for port in config["ports"].as_vec().unwrap() {
     if !port["tcp"].is_badvalue() {
@@ -213,8 +221,9 @@ fn main() {
         println!("  with banner: {}", to_hex(x.as_bytes()));
       }
       let regexset = regexset.clone();
+      let bind_ip = bind_ip.clone();
       thread::spawn(move || {
-        let server = TcpListener::bind(("0.0.0.0", portno as u16)).expect("Port can't be bound (is it in use?)"); // Add more error checking here
+        let server = TcpListener::bind((bind_ip.as_str(), portno as u16)).expect("Port can't be bound (is it in use?)"); // Add more error checking here
         for res in server.incoming() {
           let mut stream = match res {
             Ok(stream) => stream,
