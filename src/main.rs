@@ -110,6 +110,16 @@ fn to_hex(bytes: &[u8]) -> String {
   }
   result
 }
+fn to_dotline(bytes: &[u8]) -> String {
+  let mut result = String::with_capacity(bytes.len());
+
+  for byte in bytes.iter() {
+    if *byte > 31 && *byte < 127 { result.push(*byte as char) }
+    else if *byte == 0 { result.push('-'); }
+    else { result.push('.'); }
+  }
+  result
+}
 
 fn setup() -> App {
   let authorstring: String = str::replace(env!("CARGO_PKG_AUTHORS"), ":", "\n");
@@ -218,7 +228,7 @@ fn main() {
       let mut banner = Arc::new(String::new());
       if let Some(x) = port["banner"].as_str() {
         Arc::get_mut(& mut banner).unwrap().push_str(x);
-        println!("  with banner: {}", to_hex(x.as_bytes()));
+        println!("  with banner: {}", to_dotline(x.as_bytes()));
       }
       let regexset = regexset.clone();
       let bind_ip = bind_ip.clone();
@@ -265,7 +275,7 @@ fn main() {
           thread::spawn(move || {
             if banner.len() > 0 {
               match stream.write((*banner).as_bytes()) {
-                Ok(_) => println!("> <banner>"),
+                Ok(_) => println!("> {}", to_dotline((*banner).as_bytes())),
                 Err(e) => {
                   if e.kind() == io::ErrorKind::WouldBlock { println!("WRITE TIMEOUT TCP {} from {}", portno, addr); }
                   else { println!("WRITE ERROR TCP {} from {}: {}", portno, addr, e.to_string()); }
