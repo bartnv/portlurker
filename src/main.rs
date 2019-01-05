@@ -12,7 +12,7 @@ use std::io;
 use std::io::prelude::*;
 use std::net::{TcpListener, IpAddr};
 use std::time::Duration;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::process::exit;
 use yaml_rust::YamlLoader;
@@ -53,7 +53,7 @@ const BINARY_MATCHES: [(&str, &str);24] = [ // Global array, so needs an explici
   ("Bitcoin main chain magic number", r"\xf9\xbe\xb4\xd9")
 ];
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 struct App {
   print_ascii: bool,
   print_binary: bool,
@@ -187,7 +187,7 @@ fn setup() -> App {
 }
 
 fn main() {
-  let app: App = setup(); // Print initial UI stuff, then parse the config file, and store the config
+  let app = Arc::new(RwLock::new(setup())); // Print initial UI stuff, then parse the config file, and store the config
   let io_timeout = Duration::new(300, 0); // 5 minutes
   let bind_ip;
 
@@ -230,6 +230,7 @@ fn main() {
         Arc::get_mut(& mut banner).unwrap().push_str(x);
         println!("  with banner: {}", to_dotline(x.as_bytes()));
       }
+      let app = app.clone();
       let regexset = regexset.clone();
       let bind_ip = bind_ip.clone();
       thread::spawn(move || {
@@ -248,10 +249,10 @@ fn main() {
 
           let log_msg = format!("[{}]: CONNECT TCP {} from {}", formatted_time, portno, addr);
           println!("{}", log_msg);
-          if app.file_logging {
+          if app.read().unwrap().file_logging {
             log_to_file(log_msg.to_string());
           }
-          if app.sql_logging {
+          if app.read().unwrap().sql_logging {
             let newdbentry = LoggedConnection {
               remoteip: addr.ip().to_string(),
               remoteport: addr.port(),
@@ -264,12 +265,12 @@ fn main() {
                             ).expect("Can't write new row into table! Subsequent logging may also fail.");},
               Err(e) => {
                 println!("Failed to open database: {} - Continuing without logging", e.to_string());
-                let mut app = app;
-                app.sql_logging = false;
+                app.write().unwrap().sql_logging = false;
               },
             }
           }
 
+          let app = app.clone();
           let regexset = regexset.clone();
           let banner = banner.clone();
           thread::spawn(move || {
@@ -322,7 +323,7 @@ fn main() {
                   }
                   if found { printables.push(&buf[start..c]); }
                   if printables.len() == 1 && printables[0].len() == c {
-                    if app.print_ascii {
+                    if app.read().unwrap().print_ascii {
                       let data = String::from_utf8_lossy(printables[0]);
                       for line in data.lines() {
                         println!("| {}", line);
@@ -346,7 +347,7 @@ fn main() {
                     for line in mbstring.lines() {
                       if line.len() > 3 { println!("% {}", line); }
                     }
-                    if app.print_binary {
+                    if app.read().unwrap().print_binary {
                       let hex = to_hex(&buf[..c]);
                       for line in hex.lines() { println!(". {}", line); }
                     }
