@@ -16,7 +16,7 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use std::process::exit;
 use yaml_rust::YamlLoader;
-use regex::bytes::RegexSetBuilder;
+use regex::bytes::{RegexSet, RegexSetBuilder};
 use rusqlite::Connection;
 use rusqlite::types::ToSql;
 use chrono::Local;
@@ -58,7 +58,9 @@ struct App {
   print_ascii: bool,
   print_binary: bool,
   sql_logging: bool,
-  file_logging: bool
+  file_logging: bool,
+  io_timeout: Duration,
+  regexset: RegexSet
 }
 
 #[derive(Debug)]
@@ -68,66 +70,13 @@ struct LoggedConnection {
   localport: i64
 }
 
-fn log_to_file(msg: String) {
-  let mut file = OpenOptions::new()
-              .append(true)
-              .create(true)
-              .open("portlurker.log").expect("Failed to open local log file for writing");;
-  writeln!(file, "{}", msg).unwrap();
-
-}
-
-fn to_hex(bytes: &[u8]) -> String {
-  let mut count = 0;
-  let mut result = String::with_capacity(67);
-  let mut dotline = String::with_capacity(18);
-
-  for byte in bytes.iter() {
-    if count != 0 && count%8 == 0 {
-      result.push(' ');
-      if count%16 == 0 {
-        dotline.push('\n');
-        result.push_str(&dotline);
-        result.reserve(67);
-        dotline.truncate(0);
-      }
-      else { dotline.push(' '); }
-    }
-    result.push_str(&format!("{:02X} ", byte));
-    if *byte > 31 && *byte < 127 { dotline.push(*byte as char) }
-    else if *byte == 0 { dotline.push('-'); }
-    else { dotline.push('.'); }
-    count += 1;
-  }
-  while count%16 != 0 {
-    if count%8 == 0 { result.push(' '); }
-    result.push_str("   ");
-    count += 1;
-  }
-  if dotline.len() != 0 {
-    result.push(' ');
-    result.push_str(&dotline);
-  }
-  result
-}
-fn to_dotline(bytes: &[u8]) -> String {
-  let mut result = String::with_capacity(bytes.len());
-
-  for byte in bytes.iter() {
-    if *byte > 31 && *byte < 127 { result.push(*byte as char) }
-    else if *byte == 0 { result.push('-'); }
-    else { result.push('.'); }
-  }
-  result
-}
-
 fn setup() -> App {
   let authorstring: String = str::replace(env!("CARGO_PKG_AUTHORS"), ":", "\n");
   println!("Portlurker v{}", VERSION);
   println!("{}", authorstring);
   println!("-----------------------------------------");
 
-  let mut app = App { print_ascii: false, print_binary: false, sql_logging: false, file_logging: false };
+  let mut app = App { print_ascii: false, print_binary: false, sql_logging: false, file_logging: false, io_timeout: Duration::new(300, 0), regexset: RegexSet::new(&[] as &[&str]).unwrap() };
 
   let mut config_str = String::new();
   let mut file = match File::open("config.yml") {
@@ -186,16 +135,212 @@ fn setup() -> App {
   return app; // send our config to the main function
 }
 
+fn log_to_file(msg: String) {
+  let mut file = OpenOptions::new()
+              .append(true)
+              .create(true)
+              .open("portlurker.log").expect("Failed to open local log file for writing");;
+  writeln!(file, "{}", msg).unwrap();
+
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+  let mut count = 0;
+  let mut result = String::with_capacity(67);
+  let mut dotline = String::with_capacity(18);
+
+  for byte in bytes.iter() {
+    if count != 0 && count%8 == 0 {
+      result.push(' ');
+      if count%16 == 0 {
+        dotline.push('\n');
+        result.push_str(&dotline);
+        result.reserve(67);
+        dotline.truncate(0);
+      }
+      else { dotline.push(' '); }
+    }
+    result.push_str(&format!("{:02X} ", byte));
+    if *byte > 31 && *byte < 127 { dotline.push(*byte as char) }
+    else if *byte == 0 { dotline.push('-'); }
+    else { dotline.push('.'); }
+    count += 1;
+  }
+  while count%16 != 0 {
+    if count%8 == 0 { result.push(' '); }
+    result.push_str("   ");
+    count += 1;
+  }
+  if dotline.len() != 0 {
+    result.push(' ');
+    result.push_str(&dotline);
+  }
+  result
+}
+fn to_dotline(bytes: &[u8]) -> String {
+  let mut result = String::with_capacity(bytes.len());
+
+  for byte in bytes.iter() {
+    if *byte > 31 && *byte < 127 { result.push(*byte as char) }
+    else if *byte == 0 { result.push('-'); }
+    else { result.push('.'); }
+  }
+  result
+}
+
+fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, banner: Arc<String>) {
+  thread::spawn(move || {
+    for res in socket.incoming() {
+      let mut stream = match res {
+        Ok(stream) => stream,
+        Err(e) => { println!("ACCEPT ERROR TCP {}: {}", socket.local_addr().unwrap().port(), e.to_string()); continue; }
+      };
+      stream.set_read_timeout(Some(app.read().unwrap().io_timeout)).expect("Failed to set read timeout on TcpStream");
+      stream.set_write_timeout(Some(app.read().unwrap().io_timeout)).expect("Failed to set write timeout on TcpStream");
+      let local = stream.local_addr().unwrap();
+      let peer = stream.peer_addr().unwrap();
+
+      let current_time = Local::now();
+      let formatted_time = format!("{}", current_time.format("%a %d %b %Y - %H:%M.%S"));
+
+      let log_msg = format!("[{}]: CONNECT TCP {} from {}", formatted_time, local.port(), peer);
+      println!("{}", log_msg);
+      if app.read().unwrap().file_logging {
+        log_to_file(log_msg.to_string());
+      }
+      if app.read().unwrap().sql_logging {
+        let newdbentry = LoggedConnection {
+          remoteip: peer.ip().to_string(),
+          remoteport: peer.port(),
+          localport: local.port() as i64
+        };
+        match Connection::open("portlurker.sqlite") {
+          Ok(conn) => { conn.execute("INSERT INTO connections (
+                          remoteip, remoteport, localport) VALUES (
+                          ?1, ?2, ?3)", &[&newdbentry.remoteip as &ToSql, &newdbentry.remoteport, &newdbentry.localport]
+                        ).expect("Can't write new row into table! Subsequent logging may also fail.");},
+          Err(e) => {
+            println!("Failed to open database: {} - Continuing without logging", e.to_string());
+            app.write().unwrap().sql_logging = false;
+          },
+        }
+      }
+
+      let app = app.clone();
+      let banner = banner.clone();
+      thread::spawn(move || {
+        if banner.len() > 0 {
+          match stream.write((*banner).as_bytes()) {
+            Ok(_) => println!("> {}", to_dotline((*banner).as_bytes())),
+            Err(e) => {
+              if e.kind() == io::ErrorKind::WouldBlock { println!("WRITE TIMEOUT TCP {} from {}", local.port(), peer); }
+              else { println!("WRITE ERROR TCP {} from {}: {}", local.port(), peer, e.to_string()); }
+              return;
+            }
+          }
+        }
+        let mut buf: [u8; 2048] = [0; 2048];
+        loop {
+          match stream.read(&mut buf) {
+            Ok(c) => {
+              if c == 0 {
+                println!("CLOSE TCP {} from {}", local.port(), peer);
+                break;
+              }
+              let mut printables = Vec::new();
+              let mut found = false;
+              let mut mbfound = false;
+              let mut mbstring = String::new();
+              let mut start = 0;
+              for i in 0..c {
+                if (buf[i] > 31 && buf[i] < 127) || buf[i] == 10 || buf[i] == 13 {
+                  if !found {
+                    start = i;
+                    found = true;
+                  }
+                }
+                else {
+                  if found {
+                    if i-start == 1 {
+                      if (start > 0) && (buf[start-1] == 0) {
+                        mbstring.push(buf[i-1] as char);
+                        if !mbfound { mbfound = true; }
+                      }
+                    }
+                    else { printables.push(&buf[start..i]); }
+                    found = false;
+                  }
+                  else if mbfound {
+                    mbstring.push('\n');
+                    mbfound = false;
+                  }
+                }
+              }
+              if found { printables.push(&buf[start..c]); }
+              if printables.len() == 1 && printables[0].len() == c {
+                if app.read().unwrap().print_ascii {
+                  let data = String::from_utf8_lossy(printables[0]);
+                  for line in data.lines() {
+                    println!("| {}", line);
+                  }
+                }
+                else { println!("! Read {} bytes of printable ASCII", c); }
+              }
+              else {
+                println!("! Read {} bytes of binary", c);
+                for id in app.read().unwrap().regexset.matches(&buf[..c]).into_iter() {
+                  println!("^ Matches pattern {}", BINARY_MATCHES[id].0);
+                }
+                for printable in printables {
+                  if printable.len() > 3 {
+                    let data = String::from_utf8_lossy(printable);
+                    for line in data.lines() {
+                      println!("$ {}", line);
+                    }
+                  }
+                }
+                for line in mbstring.lines() {
+                  if line.len() > 3 { println!("% {}", line); }
+                }
+                if app.read().unwrap().print_binary {
+                  let hex = to_hex(&buf[..c]);
+                  for line in hex.lines() { println!(". {}", line); }
+                }
+              }
+            }
+            Err(e) => {
+              if e.kind() == io::ErrorKind::WouldBlock { println!("READ TIMEOUT TCP {} from {}", local.port(), peer); }
+              else { println!("READ ERROR TCP {} from {}: {}", local.port(), peer, e.to_string()); }
+              break;
+            }
+          }
+          match stream.take_error() {
+            Ok(opt) => {
+              if opt.is_some() {
+                println!("ERROR TCP {} from {}: {}", local.port(), peer, opt.unwrap().to_string());
+                break;
+              }
+            }
+            Err(_) => {
+              println!("This shouldn't happen...");
+              break;
+            }
+          }
+        }
+      });
+    }
+  });
+}
+
 fn main() {
   let app = Arc::new(RwLock::new(setup())); // Print initial UI stuff, then parse the config file, and store the config
-  let io_timeout = Duration::new(300, 0); // 5 minutes
   let bind_ip;
 
   let mut patterns = Vec::with_capacity(BINARY_MATCHES.len());
   for &(_, pattern) in BINARY_MATCHES.into_iter() {
     patterns.push(pattern);
   }
-  let regexset = RegexSetBuilder::new(patterns)
+  app.write().unwrap().regexset = RegexSetBuilder::new(patterns)
     .unicode(false)
     .dot_matches_new_line(false)
     .build().unwrap();
@@ -231,150 +376,11 @@ fn main() {
         println!("  with banner: {}", to_dotline(x.as_bytes()));
       }
       let app = app.clone();
-      let regexset = regexset.clone();
       let bind_ip = bind_ip.clone();
-      thread::spawn(move || {
-        let server = TcpListener::bind((bind_ip.as_str(), portno as u16)).expect("Port can't be bound (is it in use?)"); // Add more error checking here
-        for res in server.incoming() {
-          let mut stream = match res {
-            Ok(stream) => stream,
-            Err(e) => { println!("ACCEPT ERROR TCP {}: {}", portno, e.to_string()); continue; }
-          };
-          stream.set_read_timeout(Some(io_timeout)).expect("Failed to set read timeout on TcpStream");
-          stream.set_write_timeout(Some(io_timeout)).expect("Failed to set write timeout on TcpStream");
-          let addr = stream.peer_addr().unwrap();
-
-          let current_time = Local::now();
-          let formatted_time = format!("{}", current_time.format("%a %d %b %Y - %H:%M.%S"));
-
-          let log_msg = format!("[{}]: CONNECT TCP {} from {}", formatted_time, portno, addr);
-          println!("{}", log_msg);
-          if app.read().unwrap().file_logging {
-            log_to_file(log_msg.to_string());
-          }
-          if app.read().unwrap().sql_logging {
-            let newdbentry = LoggedConnection {
-              remoteip: addr.ip().to_string(),
-              remoteport: addr.port(),
-              localport: portno
-            };
-            match Connection::open("portlurker.sqlite") {
-              Ok(conn) => { conn.execute("INSERT INTO connections (
-                              remoteip, remoteport, localport) VALUES (
-                              ?1, ?2, ?3)", &[&newdbentry.remoteip as &ToSql, &newdbentry.remoteport, &newdbentry.localport]
-                            ).expect("Can't write new row into table! Subsequent logging may also fail.");},
-              Err(e) => {
-                println!("Failed to open database: {} - Continuing without logging", e.to_string());
-                app.write().unwrap().sql_logging = false;
-              },
-            }
-          }
-
-          let app = app.clone();
-          let regexset = regexset.clone();
-          let banner = banner.clone();
-          thread::spawn(move || {
-            if banner.len() > 0 {
-              match stream.write((*banner).as_bytes()) {
-                Ok(_) => println!("> {}", to_dotline((*banner).as_bytes())),
-                Err(e) => {
-                  if e.kind() == io::ErrorKind::WouldBlock { println!("WRITE TIMEOUT TCP {} from {}", portno, addr); }
-                  else { println!("WRITE ERROR TCP {} from {}: {}", portno, addr, e.to_string()); }
-                  return;
-                }
-              }
-            }
-            let mut buf: [u8; 2048] = [0; 2048];
-            loop {
-              match stream.read(&mut buf) {
-                Ok(c) => {
-                  if c == 0 {
-                    println!("CLOSE TCP {} from {}", portno, addr);
-                    break;
-                  }
-                  let mut printables = Vec::new();
-                  let mut found = false;
-                  let mut mbfound = false;
-                  let mut mbstring = String::new();
-                  let mut start = 0;
-                  for i in 0..c {
-                    if (buf[i] > 31 && buf[i] < 127) || buf[i] == 10 || buf[i] == 13 {
-                      if !found {
-                        start = i;
-                        found = true;
-                      }
-                    }
-                    else {
-                      if found {
-                        if i-start == 1 {
-                          if (start > 0) && (buf[start-1] == 0) {
-                            mbstring.push(buf[i-1] as char);
-                            if !mbfound { mbfound = true; }
-                          }
-                        }
-                        else { printables.push(&buf[start..i]); }
-                        found = false;
-                      }
-                      else if mbfound {
-                        mbstring.push('\n');
-                        mbfound = false;
-                      }
-                    }
-                  }
-                  if found { printables.push(&buf[start..c]); }
-                  if printables.len() == 1 && printables[0].len() == c {
-                    if app.read().unwrap().print_ascii {
-                      let data = String::from_utf8_lossy(printables[0]);
-                      for line in data.lines() {
-                        println!("| {}", line);
-                      }
-                    }
-                    else { println!("! Read {} bytes of printable ASCII", c); }
-                  }
-                  else {
-                    println!("! Read {} bytes of binary", c);
-                    for id in regexset.matches(&buf[..c]).into_iter() {
-                      println!("^ Matches pattern {}", BINARY_MATCHES[id].0);
-                    }
-                    for printable in printables {
-                      if printable.len() > 3 {
-                        let data = String::from_utf8_lossy(printable);
-                        for line in data.lines() {
-                          println!("$ {}", line);
-                        }
-                      }
-                    }
-                    for line in mbstring.lines() {
-                      if line.len() > 3 { println!("% {}", line); }
-                    }
-                    if app.read().unwrap().print_binary {
-                      let hex = to_hex(&buf[..c]);
-                      for line in hex.lines() { println!(". {}", line); }
-                    }
-                  }
-                }
-                Err(e) => {
-                  if e.kind() == io::ErrorKind::WouldBlock { println!("READ TIMEOUT TCP {} from {}", portno, addr); }
-                  else { println!("READ ERROR TCP {} from {}: {}", portno, addr, e.to_string()); }
-                  break;
-                }
-              }
-              match stream.take_error() {
-                Ok(opt) => {
-                  if opt.is_some() {
-                    println!("ERROR TCP {} from {}: {}", portno, addr, opt.unwrap().to_string());
-                    break;
-                  }
-                }
-                Err(_) => {
-                  println!("This shouldn't happen...");
-                  break;
-                }
-              }
-            }
-          });
-        }
-      });
+      match TcpListener::bind((bind_ip.as_str(), portno as u16)) {
+        Ok(socket) => lurk(app, socket, banner),
+        Err(e) => { println!("ERROR binding to {}: {}", portno, e.to_string()) }
+      };
     }
     else if !port["udp"].is_badvalue() {
       println!("UDP port {}", port["udp"].as_i64().unwrap());
@@ -394,7 +400,7 @@ fn main() {
   assert!(rc == 0);
 
   q.create_queue(0, nfq_callback);
-  q.set_mode(nfqueue::CopyMode::CopyPacket, 0xffff);
+  q.set_mode(nfqueue::CopyMode::CopyPacket, 0x00df); // 64 bits should be sufficient to look at the TCP header
 
   q.run_loop(); // Infinite loop
   q.close();
