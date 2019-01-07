@@ -59,6 +59,7 @@ struct App {
   print_binary: bool,
   sql_logging: bool,
   file_logging: bool,
+  bind_ip: String,
   io_timeout: Duration,
   regexset: RegexSet
 }
@@ -76,7 +77,7 @@ fn setup() -> App {
   println!("{}", authorstring);
   println!("-----------------------------------------");
 
-  let mut app = App { print_ascii: false, print_binary: false, sql_logging: false, file_logging: false, io_timeout: Duration::new(300, 0), regexset: RegexSet::new(&[] as &[&str]).unwrap() };
+  let mut app = App { print_ascii: false, print_binary: false, sql_logging: false, file_logging: false, bind_ip: String::new(), io_timeout: Duration::new(300, 0), regexset: RegexSet::new(&[] as &[&str]).unwrap() };
 
   let mut config_str = String::new();
   let mut file = match File::open("config.yml") {
@@ -96,6 +97,13 @@ fn setup() -> App {
     println!("No 'ports' section found in configuration file");
     exit(-1);
   }
+
+  if !config["general"]["bind_ip"].is_badvalue() {
+    app.bind_ip = config["general"]["bind_ip"].as_str().expect("Configuration item 'bind_ip' is not valid").to_string();
+    println!("Binding to external IP {}", app.bind_ip);
+  }
+  else { app.bind_ip = String::from("0.0.0.0"); }
+
   if !config["general"]["print_ascii"].is_badvalue() {
     if config["general"]["print_ascii"].as_bool().unwrap() {
       app.print_ascii = true;
@@ -334,7 +342,6 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, banner: Arc<String>) {
 
 fn main() {
   let app = Arc::new(RwLock::new(setup())); // Print initial UI stuff, then parse the config file, and store the config
-  let bind_ip;
 
   let mut patterns = Vec::with_capacity(BINARY_MATCHES.len());
   for &(_, pattern) in BINARY_MATCHES.into_iter() {
@@ -358,12 +365,6 @@ fn main() {
   let docs = YamlLoader::load_from_str(&config_str).unwrap();
   let config = &docs[0];
 
-  if !config["general"]["bind_ip"].is_badvalue() {
-    bind_ip = config["general"]["bind_ip"].as_str().expect("Configuration item 'bind_ip' is not valid").to_string();
-    println!("Binding to external IP {}", bind_ip);
-  }
-  else { bind_ip = String::from("0.0.0.0"); }
-
   let mut tcp_ports: Vec<u16> = vec![];
   for port in config["ports"].as_vec().unwrap() {
     if !port["tcp"].is_badvalue() {
@@ -376,7 +377,7 @@ fn main() {
         println!("  with banner: {}", to_dotline(x.as_bytes()));
       }
       let app = app.clone();
-      let bind_ip = bind_ip.clone();
+      let bind_ip = app.read().unwrap().bind_ip.clone();
       match TcpListener::bind((bind_ip.as_str(), portno as u16)) {
         Ok(socket) => lurk(app, socket, banner),
         Err(e) => { println!("ERROR binding to {}: {}", portno, e.to_string()) }
