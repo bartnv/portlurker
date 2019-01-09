@@ -230,10 +230,10 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
       thread::spawn(move || {
         if banner.len() > 0 {
           match stream.write((*banner).as_bytes()) {
-            Ok(_) => println!("> {}", to_dotline((*banner).as_bytes())),
+            Ok(_) => println!("{:>5} > {}", local.port(), to_dotline((*banner).as_bytes())),
             Err(e) => {
-              if e.kind() == io::ErrorKind::WouldBlock { println!("WRITE TIMEOUT TCP {} from {}", local.port(), peer); }
-              else { println!("WRITE ERROR TCP {} from {}: {}", local.port(), peer, e.to_string()); }
+              if e.kind() == io::ErrorKind::WouldBlock { println!("{:>5} - TCP WRITE TIMEOUT from {}", local.port(), peer); }
+              else { println!("{:>5} - TCP WRITE ERROR to {}: {}", local.port(), peer, e.to_string()); }
               return;
             }
           }
@@ -243,7 +243,7 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
           match stream.read(&mut buf) {
             Ok(c) => {
               if c == 0 {
-                println!("CLOSE TCP {} from {}", local.port(), peer);
+                println!("{:>5} - TCP CLOSE from {}", local.port(), peer);
                 break;
               }
               let mut printables = Vec::new();
@@ -280,43 +280,43 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
                 if app.read().unwrap().print_ascii {
                   let data = String::from_utf8_lossy(printables[0]);
                   for line in data.lines() {
-                    println!("| {}", line);
+                    println!("{:>5} | {}", local.port(), line);
                   }
                 }
-                else { println!("! Read {} bytes of printable ASCII", c); }
+                else { println!("{:>5} ! Read {} bytes of printable ASCII", local.port(), c); }
               }
               else {
-                println!("! Read {} bytes of binary", c);
+                println!("{:>5} ! Read {} bytes of binary", local.port(), c);
                 for id in app.read().unwrap().regexset.matches(&buf[..c]).into_iter() {
-                  println!("^ Matches pattern {}", BINARY_MATCHES[id].0);
+                  println!("{:>5} ^ Matches pattern {}", local.port(), BINARY_MATCHES[id].0);
                 }
                 for printable in printables {
                   if printable.len() > 3 {
                     let data = String::from_utf8_lossy(printable);
                     for line in data.lines() {
-                      println!("$ {}", line);
+                      println!("{:>5} $ {}", local.port(), line);
                     }
                   }
                 }
                 for line in mbstring.lines() {
-                  if line.len() > 3 { println!("% {}", line); }
+                  if line.len() > 3 { println!("{:>5} % {}", local.port(), line); }
                 }
                 if app.read().unwrap().print_binary {
                   let hex = to_hex(&buf[..c]);
-                  for line in hex.lines() { println!(". {}", line); }
+                  for line in hex.lines() { println!("{:>5} . {}", local.port(), line); }
                 }
               }
             }
             Err(e) => {
-              if e.kind() == io::ErrorKind::WouldBlock { println!("READ TIMEOUT TCP {} from {}", local.port(), peer); }
-              else { println!("READ ERROR TCP {} from {}: {}", local.port(), peer, e.to_string()); }
+              if e.kind() == io::ErrorKind::WouldBlock { println!("{:>5} - TCP READ TIMEOUT from {}", local.port(), peer); }
+              else { println!("{:>5} - TCP READ ERROR from {}: {}", local.port(), peer, e.to_string()); }
               break;
             }
           }
           match stream.take_error() {
             Ok(opt) => {
               if opt.is_some() {
-                println!("ERROR TCP {} from {}: {}", local.port(), peer, opt.unwrap().to_string());
+                println!("{:>5} - TCP ERROR from {}: {}", local.port(), peer, opt.unwrap().to_string());
                 break;
               }
             }
