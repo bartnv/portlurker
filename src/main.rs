@@ -83,7 +83,13 @@ struct LogEntry {
   entrytype: LogEntryType,
   remoteip: String,
   remoteport: u16,
-  localport: i64
+  localport: u16
+}
+
+#[derive(Clone)]
+struct Port {
+  number: u16,
+  count: u64
 }
 
 fn setup() -> App {
