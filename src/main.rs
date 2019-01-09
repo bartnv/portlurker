@@ -61,6 +61,7 @@ struct App {
   print_binary: bool,
   sql_logging: bool,
   file_logging: bool,
+  nfqueue: Option<u16>,
   bind_ip: String,
   io_timeout: Duration,
   regexset: RegexSet
@@ -98,7 +99,16 @@ fn setup() -> App {
   println!("{}", authorstring);
   println!("-----------------------------------------");
 
-  let mut app = App { print_ascii: false, print_binary: false, sql_logging: false, file_logging: false, bind_ip: String::new(), io_timeout: Duration::new(300, 0), regexset: RegexSet::new(&[] as &[&str]).unwrap() };
+  let mut app = App {
+    print_ascii: false,
+    print_binary: false,
+    sql_logging: false,
+    file_logging: false,
+    nfqueue: None,
+    bind_ip: String::new(),
+    io_timeout: Duration::new(300, 0),
+    regexset: RegexSet::new(&[] as &[&str]).unwrap()
+  };
 
   let mut config_str = String::new();
   let mut file = match File::open("config.yml") {
@@ -161,6 +171,18 @@ fn setup() -> App {
       };
     }
   }
+  if !config["general"]["nfqueue"].is_badvalue() {
+    match config["general"]["nfqueue"].as_i64() {
+      Some(queue) => {
+        app.nfqueue = Some(queue as u16);
+        println!("Receiving SYN packets from nfqueue {}", app.nfqueue.unwrap());
+        println!("Example iptables rule to make this work:");
+        println!("\n    iptables -A INPUT -p tcp --syn -j NFQUEUE --queue-num {} --queue-bypass", app.nfqueue.unwrap());
+      },
+      None => { println!("Configuration item 'nfqueue' is not a valid integer") }
+    };
+  }
+
   return app; // send our config to the main function
 }
 
@@ -370,7 +392,7 @@ fn main() {
       if conn.entrytype == LogEntryType::Syn {
         ports[conn.localport as usize].count += 1;
         counter += 1;
-        if counter%10 == 0 {
+        if counter%100 == 0 {
           let mut ports = ports.clone();
           ports.sort_unstable_by_key(|k| k.count);
           let last = ports.last().unwrap();
@@ -430,21 +452,27 @@ fn main() {
     }
   }
 
-  let logchan = tx.clone();
-  let mut state = State::new(logchan);
-  state.ports = tcp_ports.clone();
-  let mut q = nfqueue::Queue::new(state);
-  q.open();
-  q.unbind(libc::AF_INET);
+  let nfqueue = app.read().unwrap().nfqueue;
+  if let Some(qid) = nfqueue {
+    let logchan = tx.clone();
+    let mut state = State::new(logchan);
+    state.ports = tcp_ports.clone();
+    let mut q = nfqueue::Queue::new(state);
+    q.open();
+    q.unbind(libc::AF_INET);
 
-  let rc = q.bind(libc::AF_INET);
-  assert!(rc == 0);
+    let rc = q.bind(libc::AF_INET);
+    assert!(rc == 0);
 
-  q.create_queue(0, nfq_callback);
-  q.set_mode(nfqueue::CopyMode::CopyPacket, 0x00df); // 64 bits should be sufficient to look at the TCP header
+    q.create_queue(qid, nfq_callback);
+    q.set_mode(nfqueue::CopyMode::CopyPacket, 0x00df); // 64 bits should be sufficient to look at the TCP header
 
-  q.run_loop(); // Infinite loop
-  q.close();
+    q.run_loop(); // Infinite loop
+    q.close();
+  }
+  else {
+    loop { thread::sleep(Duration::new(60, 0)); } // Nothing to do in the main thread
+  }
 }
 
 fn nfq_callback(msg: &nfqueue::Message, state: &mut State) {
