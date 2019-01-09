@@ -6,15 +6,17 @@ extern crate libc;
 extern crate nfqueue;
 extern crate pnet;
 
+use std::fmt;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io;
 use std::io::prelude::*;
 use std::net::{TcpListener, IpAddr};
-use std::time::Duration;
-use std::sync::{Arc, RwLock};
-use std::thread;
 use std::process::exit;
+use std::sync::{Arc, RwLock};
+use std::sync::mpsc::{channel, Sender};
+use std::thread;
+use std::time::Duration;
 use yaml_rust::YamlLoader;
 use regex::bytes::{RegexSet, RegexSetBuilder};
 use rusqlite::Connection;
@@ -64,8 +66,21 @@ struct App {
   regexset: RegexSet
 }
 
-#[derive(Debug)]
-struct LoggedConnection {
+#[derive(PartialEq, Eq)]
+enum LogEntryType {
+  Syn,
+  Ack
+}
+impl fmt::Display for LogEntryType {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    match *self {
+      LogEntryType::Syn => write!(f, "SYN"),
+      LogEntryType::Ack => write!(f, "CON")
+    }
+  }
+}
+struct LogEntry {
+  entrytype: LogEntryType,
   remoteip: String,
   remoteport: u16,
   localport: i64
@@ -143,15 +158,6 @@ fn setup() -> App {
   return app; // send our config to the main function
 }
 
-fn log_to_file(msg: String) {
-  let mut file = OpenOptions::new()
-              .append(true)
-              .create(true)
-              .open("portlurker.log").expect("Failed to open local log file for writing");;
-  writeln!(file, "{}", msg).unwrap();
-
-}
-
 fn to_hex(bytes: &[u8]) -> String {
   let mut count = 0;
   let mut result = String::with_capacity(67);
@@ -196,42 +202,21 @@ fn to_dotline(bytes: &[u8]) -> String {
   result
 }
 
-fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, banner: Arc<String>) {
+fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, banner: Arc<String>) {
   thread::spawn(move || {
     for res in socket.incoming() {
       let mut stream = match res {
         Ok(stream) => stream,
-        Err(e) => { println!("ACCEPT ERROR TCP {}: {}", socket.local_addr().unwrap().port(), e.to_string()); continue; }
+        Err(e) => { println!("{:>5} ? TCP ACCEPT ERROR: {}", socket.local_addr().unwrap().port(), e.to_string()); continue; }
       };
       stream.set_read_timeout(Some(app.read().unwrap().io_timeout)).expect("Failed to set read timeout on TcpStream");
       stream.set_write_timeout(Some(app.read().unwrap().io_timeout)).expect("Failed to set write timeout on TcpStream");
       let local = stream.local_addr().unwrap();
       let peer = stream.peer_addr().unwrap();
 
-      let current_time = Local::now();
-      let formatted_time = format!("{}", current_time.format("%a %d %b %Y - %H:%M.%S"));
-
-      let log_msg = format!("[{}]: CONNECT TCP {} from {}", formatted_time, local.port(), peer);
-      println!("{}", log_msg);
-      if app.read().unwrap().file_logging {
-        log_to_file(log_msg.to_string());
-      }
-      if app.read().unwrap().sql_logging {
-        let newdbentry = LoggedConnection {
-          remoteip: peer.ip().to_string(),
-          remoteport: peer.port(),
-          localport: local.port() as i64
-        };
-        match Connection::open("portlurker.sqlite") {
-          Ok(conn) => { conn.execute("INSERT INTO connections (
-                          remoteip, remoteport, localport) VALUES (
-                          ?1, ?2, ?3)", &[&newdbentry.remoteip as &ToSql, &newdbentry.remoteport, &newdbentry.localport]
-                        ).expect("Can't write new row into table! Subsequent logging may also fail.");},
-          Err(e) => {
-            println!("Failed to open database: {} - Continuing without logging", e.to_string());
-            app.write().unwrap().sql_logging = false;
-          },
-        }
+      println!("{:>5} + TCP CONNECT from {}", local.port(), peer);
+      if logchan.send(LogEntry { entrytype: LogEntryType::Ack, remoteip: peer.ip().to_string(), remoteport: peer.port(), localport: local.port() }).is_err() {
+        println!("Failed to write LogEntry to logging thread");
       }
 
       let app = app.clone();
@@ -365,6 +350,53 @@ fn main() {
   let docs = YamlLoader::load_from_str(&config_str).unwrap();
   let config = &docs[0];
 
+  let (tx, rx) = channel();
+  let mut sql_logging = app.read().unwrap().sql_logging;
+  let file_logging = app.read().unwrap().file_logging;
+  thread::spawn(move|| { // Logging thread
+    let mut counter = 0;
+    let mut ports = Vec::with_capacity(65536);
+    for number in 0..=65535 { ports.push(Port { number, count: 0 }) };
+
+    loop {
+      let conn: LogEntry = rx.recv().unwrap();
+
+      if conn.entrytype == LogEntryType::Syn {
+        ports[conn.localport as usize].count += 1;
+        counter += 1;
+        if counter%10 == 0 {
+          let mut ports = ports.clone();
+          ports.sort_unstable_by_key(|k| k.count);
+          let last = ports.last().unwrap();
+          println!("----- i No 1 port: {} with {} SYNs", last.number, last.count);
+        }
+      }
+
+      if file_logging {
+        let current_time = Local::now();
+        let formatted_time = format!("{}", current_time.format("%a %d %b %Y - %H:%M.%S"));
+        let log_msg = format!("[{}]: {} TCP {} from {}:{}", formatted_time, conn.entrytype, conn.localport, conn.remoteip, conn.remoteport);
+        let mut file = OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open("portlurker.log").expect("Failed to open local log file for writing");
+        writeln!(file, "{}", log_msg).unwrap();
+      }
+      if sql_logging && (conn.entrytype == LogEntryType::Ack) {
+        match Connection::open("portlurker.sqlite") {
+          Ok(dbh) => { dbh.execute("INSERT INTO connections (
+                          remoteip, remoteport, localport) VALUES (
+                          ?1, ?2, ?3)", &[&conn.remoteip as &ToSql, &conn.remoteport, &conn.localport]
+                        ).expect("Can't write new row into table! Subsequent logging may also fail.");},
+          Err(e) => {
+            println!("Failed to open database: {} - Continuing without logging", e.to_string());
+            sql_logging = false;
+          }
+        }
+      }
+    }
+  });
+
   let mut tcp_ports: Vec<u16> = vec![];
   for port in config["ports"].as_vec().unwrap() {
     if !port["tcp"].is_badvalue() {
@@ -377,9 +409,10 @@ fn main() {
         println!("  with banner: {}", to_dotline(x.as_bytes()));
       }
       let app = app.clone();
+      let logchan = tx.clone();
       let bind_ip = app.read().unwrap().bind_ip.clone();
       match TcpListener::bind((bind_ip.as_str(), portno as u16)) {
-        Ok(socket) => lurk(app, socket, banner),
+        Ok(socket) => lurk(app, socket, logchan, banner),
         Err(e) => { println!("ERROR binding to {}: {}", portno, e.to_string()) }
       };
     }
@@ -391,7 +424,8 @@ fn main() {
     }
   }
 
-  let mut state = State::new();
+  let logchan = tx.clone();
+  let mut state = State::new(logchan);
   state.ports = tcp_ports.clone();
   let mut q = nfqueue::Queue::new(state);
   q.open();
@@ -413,7 +447,9 @@ fn nfq_callback(msg: &nfqueue::Message, state: &mut State) {
      Some(h) => match h.get_next_level_protocol() {
        IpNextHeaderProtocols::Tcp => match TcpPacket::new(h.payload()) {
          Some(p) => {
-           if !state.ports.contains(&p.get_destination()) { println!("TCP SYN from {} to unmonitored port {}", IpAddr::V4(h.get_source()), p.get_destination()) }
+           let remoteip = IpAddr::V4(h.get_source());
+           if !state.ports.contains(&p.get_destination()) { println!("{:>5} = TCP SYN from {} to unmonitored port", p.get_destination(), remoteip) };
+           let _ = state.logchan.send(LogEntry { entrytype: LogEntryType::Syn, remoteip: remoteip.to_string(), remoteport: p.get_source(), localport: p.get_destination() });
          },
          None => println!("Received malformed TCP packet")
        },
@@ -426,10 +462,11 @@ fn nfq_callback(msg: &nfqueue::Message, state: &mut State) {
 }
 
 struct State {
-    ports: Vec<u16>
+    ports: Vec<u16>,
+    logchan: Sender<LogEntry>
 }
 impl State {
-    pub fn new() -> State {
-        State { ports: vec![] }
+    pub fn new(logchan: Sender<LogEntry>) -> State {
+        State { ports: vec![], logchan }
     }
 }
