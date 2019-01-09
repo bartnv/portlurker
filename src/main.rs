@@ -280,7 +280,7 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
                 if app.read().unwrap().print_ascii {
                   let data = String::from_utf8_lossy(printables[0]);
                   for line in data.lines() {
-                    println!("{:>5} | {}", local.port(), line);
+                    println!("{:>5} | {}", local.port(), line.replace("\r", ""));
                   }
                 }
                 else { println!("{:>5} ! Read {} bytes of printable ASCII", local.port(), c); }
