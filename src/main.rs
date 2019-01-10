@@ -249,7 +249,7 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
       let local = stream.local_addr().unwrap();
       let peer = stream.peer_addr().unwrap();
 
-      println!("{:>5} + TCP CON from {}", local.port(), peer);
+      println!("{:>5} + TCP ACK from {}", local.port(), peer);
       if logchan.send(LogEntry { entrytype: LogEntryType::Ack, remoteip: peer.ip().to_string(), remoteport: peer.port(), localport: local.port() }).is_err() {
         println!("Failed to write LogEntry to logging thread");
       }
@@ -490,7 +490,8 @@ fn nfq_callback(msg: &nfqueue::Message, state: &mut State) {
        IpNextHeaderProtocols::Tcp => match TcpPacket::new(h.payload()) {
          Some(p) => {
            let remoteip = IpAddr::V4(h.get_source());
-           if !state.ports.contains(&p.get_destination()) { println!("{:>5} = TCP SYN from {} to unmonitored port", p.get_destination(), remoteip) };
+           if !state.ports.contains(&p.get_destination()) { println!("{:>5} = TCP SYN from {}:{} (unmonitored)", p.get_destination(), remoteip, p.get_source()); }
+           else { println!("{:>5} = TCP SYN from {}:{}", p.get_destination(), remoteip, p.get_source()); }
            let _ = state.logchan.send(LogEntry { entrytype: LogEntryType::Syn, remoteip: remoteip.to_string(), remoteport: p.get_source(), localport: p.get_destination() });
          },
          None => println!("Received malformed TCP packet")
