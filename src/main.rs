@@ -28,7 +28,7 @@ use pnet::packet::tcp::TcpPacket;
 use pnet::packet::Packet;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
-const BINARY_MATCHES: [(&str, &str);24] = [ // Global array, so needs an explicit length
+const BINARY_MATCHES: [(&str, &str);28] = [ // Global array, so needs an explicit length
   ("SSL3.0 Record Protocol", r"^\x16\x03\x00..\x01"),
   ("TLS1.0 Record Protocol", r"^\x16\x03\x01..\x01"),
   ("TLS1.1 Record Protocol", r"^\x16\x03\x02..\x01"),
@@ -52,7 +52,11 @@ const BINARY_MATCHES: [(&str, &str);24] = [ // Global array, so needs an explici
   ("SOCKS4 NOAUTH Request", r"^\x04\x01\x00\x50"),
   ("SOCKS5 NOAUTH Request", r"^\x05\x01\x00$"), // Tested ok-ish
   ("SOCKS5 USER/PASS Request", r"^\x05\x02\x00\x02$"), // possibly broken
-  ("Bitcoin main chain magic number", r"\xf9\xbe\xb4\xd9")
+  ("Bitcoin main chain magic number", r"\xf9\xbe\xb4\xd9"),
+  ("RFB3 (VNC) protocol handshake", "^RFB 003\\.00."),
+  ("HTTP1 GET request", "^GET [^ ]+ HTTP/1"),
+  ("HTTP1 POST request", "^POST [^ ]+ HTTP/1"),
+  ("JSON RPC", "\\{.*\"jsonrpc\".*\\}")
 ];
 
 #[derive(Clone)]
