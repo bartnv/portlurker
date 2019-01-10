@@ -16,7 +16,7 @@ use std::process::exit;
 use std::sync::{Arc, RwLock};
 use std::sync::mpsc::{channel, Sender};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use yaml_rust::YamlLoader;
 use regex::bytes::{RegexSet, RegexSetBuilder};
 use rusqlite::Connection;
@@ -168,7 +168,7 @@ fn setup() -> App {
                                     remoteip   TEXT NOT NULL,
                                     remoteport INTEGER NOT NULL,
                                     localport  INTEGER NOT NULL
-                                  )", rusqlite::NO_PARAMS).expect("Failed to create table inside database! Logging may not function correctly!"); },
+                                  )", rusqlite::NO_PARAMS).expect("Failed to create table inside database! SQL logging may not function correctly!"); },
         Err(e) => {
           println!("Enabling SQL logging failed because it was not possible to open or create the database: {}\nContinuing without SQL logging", e.to_string());
         },
@@ -181,7 +181,7 @@ fn setup() -> App {
         app.nfqueue = Some(queue as u16);
         println!("Receiving SYN packets from nfqueue {}", app.nfqueue.unwrap());
         println!("Example iptables rule to make this work:");
-        println!("\n    iptables -A INPUT -p tcp --syn -j NFQUEUE --queue-num {} --queue-bypass", app.nfqueue.unwrap());
+        println!("\n  iptables -A INPUT -p tcp --syn -j NFQUEUE --queue-num {} --queue-bypass", app.nfqueue.unwrap());
       },
       None => { println!("Configuration item 'nfqueue' is not a valid integer") }
     };
@@ -239,14 +239,14 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
     for res in socket.incoming() {
       let mut stream = match res {
         Ok(stream) => stream,
-        Err(e) => { println!("{:>5} ? TCP ACCEPT ERROR: {}", socket.local_addr().unwrap().port(), e.to_string()); continue; }
+        Err(e) => { println!("{:>5} ? TCP ERR ACCEPT: {}", socket.local_addr().unwrap().port(), e.to_string()); continue; }
       };
       stream.set_read_timeout(Some(app.read().unwrap().io_timeout)).expect("Failed to set read timeout on TcpStream");
       stream.set_write_timeout(Some(app.read().unwrap().io_timeout)).expect("Failed to set write timeout on TcpStream");
       let local = stream.local_addr().unwrap();
       let peer = stream.peer_addr().unwrap();
 
-      println!("{:>5} + TCP CONNECT from {}", local.port(), peer);
+      println!("{:>5} + TCP CON from {}", local.port(), peer);
       if logchan.send(LogEntry { entrytype: LogEntryType::Ack, remoteip: peer.ip().to_string(), remoteport: peer.port(), localport: local.port() }).is_err() {
         println!("Failed to write LogEntry to logging thread");
       }
@@ -254,12 +254,13 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
       let app = app.clone();
       let banner = banner.clone();
       thread::spawn(move || {
+        let start = Instant::now();
         if banner.len() > 0 {
           match stream.write((*banner).as_bytes()) {
             Ok(_) => println!("{:>5} > {}", local.port(), to_dotline((*banner).as_bytes())),
             Err(e) => {
               if e.kind() == io::ErrorKind::WouldBlock { println!("{:>5} - TCP WRITE TIMEOUT from {}", local.port(), peer); }
-              else { println!("{:>5} - TCP WRITE ERROR to {}: {}", local.port(), peer, e.to_string()); }
+              else { println!("{:>5} - TCP ERR WRITE to {}: {}", local.port(), peer, e.to_string()); }
               return;
             }
           }
@@ -268,8 +269,8 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
         loop {
           match stream.read(&mut buf) {
             Ok(c) => {
-              if c == 0 {
-                println!("{:>5} - TCP CLOSE from {}", local.port(), peer);
+              if c == 0 {                                                            // use Duration::as_float_secs() here as soon as it stabilizes
+                println!("{:>5} - TCP FIN from {} after {:.1}s", local.port(), peer, start.elapsed().as_secs() as f32 + start.elapsed().subsec_millis() as f32/1000.0);
                 break;
               }
               let mut printables = Vec::new();
@@ -335,14 +336,14 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
             }
             Err(e) => {
               if e.kind() == io::ErrorKind::WouldBlock { println!("{:>5} - TCP READ TIMEOUT from {}", local.port(), peer); }
-              else { println!("{:>5} - TCP READ ERROR from {}: {}", local.port(), peer, e.to_string()); }
+              else { println!("{:>5} - TCP ERR READ from {}: {}", local.port(), peer, e.to_string()); }
               break;
             }
           }
           match stream.take_error() {
             Ok(opt) => {
               if opt.is_some() {
-                println!("{:>5} - TCP ERROR from {}: {}", local.port(), peer, opt.unwrap().to_string());
+                println!("{:>5} - TCP ERR from {}: {}", local.port(), peer, opt.unwrap().to_string());
                 break;
               }
             }
