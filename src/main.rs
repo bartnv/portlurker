@@ -313,9 +313,6 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
               }
               else {
                 println!("{:>5} ! Read {} bytes of binary", local.port(), c);
-                for id in app.read().unwrap().regexset.matches(&buf[..c]).into_iter() {
-                  println!("{:>5} ^ Matches pattern {}", local.port(), BINARY_MATCHES[id].0);
-                }
                 for printable in printables {
                   if printable.len() > 3 {
                     let data = String::from_utf8_lossy(printable);
@@ -331,6 +328,9 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
                   let hex = to_hex(&buf[..c]);
                   for line in hex.lines() { println!("{:>5} . {}", local.port(), line); }
                 }
+              }
+              for id in app.read().unwrap().regexset.matches(&buf[..c]).into_iter() {
+                println!("{:>5} ^ Matches pattern {}", local.port(), BINARY_MATCHES[id].0);
               }
             }
             Err(e) => {
