@@ -28,7 +28,7 @@ use pnet::packet::tcp::TcpPacket;
 use pnet::packet::Packet;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
-const BINARY_MATCHES: [(&str, &str);31] = [ // Global array, so needs an explicit length
+const BINARY_MATCHES: [(&str, &str);34] = [ // Global array, so needs an explicit length
   ("SSL3.0 Record Protocol", r"^\x16\x03\x00..\x01"),
   ("TLS1.0 Record Protocol", r"^\x16\x03\x01..\x01"),
   ("TLS1.1 Record Protocol", r"^\x16\x03\x02..\x01"),
@@ -59,7 +59,10 @@ const BINARY_MATCHES: [(&str, &str);31] = [ // Global array, so needs an explici
   ("JSON RPC", r#"\{.*"jsonrpc".*\}"#),
   ("Android ADB CONNECT", r"^CNXN\x00\x00\x00\x01"),
   ("MS-RDP Connection Request", "Cookie: mstshash="),
-  ("Generic payload dropper", r"(curl|wget)( |\+|%20)")
+  ("Generic payload dropper", r"(curl|wget)( |\+|%20)"),
+  ("SQLdict MSSQL brute force tool", r"squelda 1.0"),
+  ("MCTP REMOTE request", r"^REMOTE .*? MCTP/"),
+  ("Kguard DVR auth bypass", r"^REMOTE HI_SRDK_.*? MCTP/")
 ];
 
 #[derive(Clone)]
