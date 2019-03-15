@@ -255,7 +255,10 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
       stream.set_read_timeout(Some(app.read().unwrap().io_timeout)).expect("Failed to set read timeout on TcpStream");
       stream.set_write_timeout(Some(app.read().unwrap().io_timeout)).expect("Failed to set write timeout on TcpStream");
       let local = stream.local_addr().unwrap();
-      let peer = stream.peer_addr().unwrap();
+      let peer = match stream.peer_addr() {
+        Ok(addr) => addr,
+        Err(e) => { println!("{:>5} ? TCP ERR GETADDR: {}", socket.local_addr().unwrap().port(), e.to_string()); continue; }
+      };
 
       println!("{:>5} + TCP ACK from {}", local.port(), peer);
       if logchan.send(LogEntry { entrytype: LogEntryType::Ack, remoteip: peer.ip().to_string(), remoteport: peer.port(), localport: local.port() }).is_err() {
@@ -334,7 +337,7 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
                   }
                 }
                 for line in mbstring.lines() {
-                  if line.len() > 3 { println!("{:>5} % {}", local.port(), line); }
+                  if line.len() > 3 { println!("{:>5} % {}", local.port(), line.replace("\r", "")); }
                 }
                 if app.read().unwrap().print_binary {
                   let hex = to_hex(&buf[..c]);
