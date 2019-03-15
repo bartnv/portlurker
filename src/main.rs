@@ -102,6 +102,11 @@ struct Port {
   number: u16,
   count: u64
 }
+impl PartialEq for Port {
+  fn eq(&self, other: &Port) -> bool {
+    self.number == other.number
+  }
+}
 
 fn setup() -> App {
   let authorstring: String = str::replace(env!("CARGO_PKG_AUTHORS"), ":", "\n");
@@ -396,6 +401,7 @@ fn main() {
     let mut counter = 0;
     let mut ports = Vec::with_capacity(65536);
     for number in 0..=65535 { ports.push(Port { number, count: 0 }) };
+    let mut prevports: Vec<Port> = Vec::new();
 
     loop {
       let conn: LogEntry = rx.recv().unwrap();
@@ -405,9 +411,17 @@ fn main() {
         counter += 1;
         if counter%100 == 0 {
           let mut ports = ports.clone();
-          ports.sort_unstable_by_key(|k| k.count);
-          let last = ports.last().unwrap();
-          println!("----- i No 1 port: {} with {} SYNs", last.number, last.count);
+          ports.sort_unstable_by_key(|k| -(k.count as i64));
+          ports.truncate(10);
+          ports.shrink_to_fit();
+          println!("----- i Top 10 ports:");
+          let mut i = 0;
+          for port in &ports {
+            i += 1;
+            println!("----- i No {:>2}: {:>5} with {:>3} SYNs", i, port.number, port.count);
+            if !prevports.is_empty() && !prevports.contains(&port) { println!("----- i  Port {:>5} newly entered the top 10", port.number); }
+          }
+          prevports = ports;
         }
       }
 
