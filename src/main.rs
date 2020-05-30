@@ -376,7 +376,7 @@ fn main() {
   let app = Arc::new(RwLock::new(setup())); // Print initial UI stuff, then parse the config file, and store the config
 
   let mut patterns = Vec::with_capacity(BINARY_MATCHES.len());
-  for &(_, pattern) in BINARY_MATCHES.into_iter() {
+  for &(_, pattern) in BINARY_MATCHES.iter() {
     patterns.push(pattern);
   }
   app.write().unwrap().regexset = RegexSetBuilder::new(patterns)
@@ -442,7 +442,7 @@ fn main() {
         match Connection::open("portlurker.sqlite") {
           Ok(dbh) => { dbh.execute("INSERT INTO connections (
                           remoteip, remoteport, localport) VALUES (
-                          ?1, ?2, ?3)", &[&conn.remoteip as &ToSql, &conn.remoteport, &conn.localport]
+                          ?1, ?2, ?3)", &[&conn.remoteip as &dyn ToSql, &conn.remoteport, &conn.localport]
                         ).expect("Can't write new row into table! Subsequent logging may also fail.");},
           Err(e) => {
             println!("Failed to open database: {} - Continuing without logging", e.to_string());
