@@ -18,6 +18,8 @@ The general section has subkeys for the different options you can set in the fil
  - print_binary (boolean): show all received data as a series of integer byte values
  - sql_logging (boolean): enable logging to an sqlite3 database file (portlurker.sqlite) - Fields available right now are: id, time (since UNIX epoch), remoteip, remoteport & localport. Connections are logged, but not disconnections.
  - file_logging (boolean): enable logging to a local text file (portlurker.log). As with SQL logging only connections are logged, not disconnections.
+ - bind_ip (ip-address): configure the ip-address to bind the listening ports to; without this portlurker will bind to all available interfaces.
+ - nfqueue (integer): the nfqueue number to listen on to register SYN packets to unmonitored ports; see the Advanced section below.
 
 The ports section contains a list of listening-port specifications. Each item in the list is itself a key-value collection. At a minimum it should have either a "tcp" key (integer) or a "udp" key (integer). Additional keys can be:
  - banner (string): send this string to each new connection on the port (often you'll need to send carriage-return and linefeed after this string; you can do that in YAML by enclosing the string in double quotes and adding \r\n at the end)
@@ -36,3 +38,11 @@ ports:
  - tcp: 2443
  - udp: 53
 ```
+
+## Advanced
+It's possible to use iptables to send a copy of each SYN packet to portlurker, to register which unmonitored ports are seeing connection attempts. For this you need to add an iptables rule such as the one below *before* any reject rules.
+```
+iptables -A INPUT -p tcp -m tcp ! --dport 22 --tcp-flags FIN,SYN,RST,ACK SYN -j NFQUEUE --queue-num 0 --queue-bypass
+```
+I've exempted the SSH port here to prevent you from locking yourself out of the system. This is prudent because in principle this rule requires portlurker to be running at all times. The '--queue-bypass' option is also a safeguard,
+but I think it only kicks in once the queue is full.
