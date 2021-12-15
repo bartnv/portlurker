@@ -523,9 +523,32 @@ fn nfq_callback(msg: &nfqueue::Message, state: &mut State) {
        IpNextHeaderProtocols::Tcp => match TcpPacket::new(h.payload()) {
          Some(p) => {
            let remoteip = IpAddr::V4(h.get_source());
-           if !state.ports.contains(&p.get_destination()) { println!("{:>5} = TCP SYN from {}:{} (unmonitored)", p.get_destination(), remoteip, p.get_source()); }
-           else { println!("{:>5} = TCP SYN from {}:{}", p.get_destination(), remoteip, p.get_source()); }
-           let _ = state.logchan.send(LogEntry { entrytype: LogEntryType::Syn, remoteip: remoteip.to_string(), remoteport: p.get_source(), localport: p.get_destination() });
+           let flags = p.get_flags();
+           if flags&2 != 0 {
+               let mut extra = Vec::new();
+               if flags&1 != 0 { extra.push("FIN"); }
+               if flags&4 != 0 { extra.push("RST"); }
+               if flags&8 != 0 { extra.push("PSH"); }
+               if flags&16 != 0 { extra.push("ACK"); }
+               if flags&32 != 0 { extra.push("URG"); }
+               let text = match extra.len() {
+                   0 => String::new(),
+                   _ => format!(" with extra flags [{}]", extra.join(","))
+               };
+               if !state.transparent && !state.ports.contains(&p.get_destination()) { println!("{:>5} = TCP SYN from {}:{} (unmonitored){}", p.get_destination(), remoteip, p.get_source(), text); }
+               else { println!("{:>5} = TCP SYN from {}:{}{}", p.get_destination(), remoteip, p.get_source(), text); }
+               let _ = state.logchan.send(LogEntry { entrytype: LogEntryType::Syn, remoteip: remoteip.to_string(), remoteport: p.get_source(), localport: p.get_destination() });
+           }
+           else if flags&4 != 0 {
+               let mut extra = Vec::new();
+               if flags&1 != 0 { extra.push("FIN"); }
+               if flags&2 != 0 { extra.push("SYN"); }
+               if flags&8 != 0 { extra.push("PSH"); }
+               if flags&16 != 0 { extra.push("ACK"); }
+               if flags&32 != 0 { extra.push("URG"); }
+               if extra.len() == 0 { println!("{:>5} _ TCP RST from {}:{}", p.get_destination(), remoteip, p.get_source()); }
+               else { println!("{:>5} _ TCP RST from {}:{} with extra flags [{}]", p.get_destination(), remoteip, p.get_source(), extra.join(",")); }
+           }
          },
          None => println!("Received malformed TCP packet")
        },
