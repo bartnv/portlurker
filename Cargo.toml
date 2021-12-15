@@ -1,6 +1,7 @@
 [package]
 name = "portlurker"
 version = "0.1.3"
+edition = "2021"
 authors = ["Bart Noordervliet <bart@mmvi.nl>",
            "Mark Pentler <mark@elmarko.org>"]
 license = "MIT"

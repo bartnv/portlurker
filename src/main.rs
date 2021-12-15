@@ -30,7 +30,7 @@ use pnet::packet::tcp::TcpPacket;
 use pnet::packet::Packet;
 use nix::sys::socket::{setsockopt, sockopt::IpTransparent};
 
-const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 const BINARY_MATCHES: [(&str, &str);34] = [ // Global array, so needs an explicit length
   ("SSL3.0 Record Protocol", r"^\x16\x03\x00..\x01"),
   ("TLS1.0 Record Protocol", r"^\x16\x03\x01..\x01"),
@@ -137,7 +137,7 @@ fn setup() -> App {
   file.read_to_string(&mut config_str).unwrap();
   let docs = YamlLoader::load_from_str(&config_str).unwrap();
   let config = &docs[0];
-  //println!("{:?}", config);
+
   if config["general"].is_badvalue() {
     println!("No 'general' section found in configuration file");
     exit(-1);
@@ -201,7 +201,7 @@ fn setup() -> App {
     };
   }
 
-  return app; // send our config to the main function
+  app
 }
 
 fn to_hex(bytes: &[u8]) -> String {
@@ -231,7 +231,7 @@ fn to_hex(bytes: &[u8]) -> String {
     result.push_str("   ");
     count += 1;
   }
-  if dotline.len() != 0 {
+  if !dotline.is_empty() {
     result.push(' ');
     result.push_str(&dotline);
   }
@@ -302,21 +302,19 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
                     found = true;
                   }
                 }
-                else {
-                  if found {
-                    if i-start == 1 {
-                      if (start > 0) && (buf[start-1] == 0) {
-                        mbstring.push(buf[i-1] as char);
-                        if !mbfound { mbfound = true; }
-                      }
+                else if found {
+                  if i-start == 1 {
+                    if (start > 0) && (buf[start-1] == 0) {
+                      mbstring.push(buf[i-1] as char);
+                      if !mbfound { mbfound = true; }
                     }
-                    else { printables.push(&buf[start..i]); }
-                    found = false;
                   }
-                  else if mbfound {
-                    mbstring.push('\n');
-                    mbfound = false;
-                  }
+                  else { printables.push(&buf[start..i]); }
+                  found = false;
+                }
+                else if mbfound {
+                  mbstring.push('\n');
+                  mbfound = false;
                 }
               }
               if found { printables.push(&buf[start..c]); }
@@ -425,7 +423,7 @@ fn main() {
           for port in &ports {
             i += 1;
             println!("----- i No {:>2}: {:>5} with {:>3} SYNs", i, port.number, port.count);
-            if !prevports.is_empty() && !prevports.contains(&port) { println!("----- i  Port {:>5} newly entered the top 10", port.number); }
+            if !prevports.is_empty() && !prevports.contains(port) { println!("----- i  Port {:>5} newly entered the top 10", port.number); }
           }
           prevports = ports;
         }
@@ -495,8 +493,7 @@ fn main() {
 
   let nfqueue = app.read().unwrap().nfqueue;
   if let Some(qid) = nfqueue {
-    let logchan = tx.clone();
-    let mut state = State::new(logchan, transparent);
+    let mut state = State::new(tx, transparent);
     state.ports = tcp_ports.clone();
     let mut q = nfq::Queue::open().unwrap();
     q.bind(qid).expect("Failed to bind to nfqueue");
@@ -532,7 +529,7 @@ fn main() {
                     if flags&8 != 0 { extra.push("PSH"); }
                     if flags&16 != 0 { extra.push("ACK"); }
                     if flags&32 != 0 { extra.push("URG"); }
-                    if extra.len() == 0 { println!("{:>5} _ TCP RST from {}:{}", p.get_destination(), remoteip, p.get_source()); }
+                    if extra.is_empty() { println!("{:>5} _ TCP RST from {}:{}", p.get_destination(), remoteip, p.get_source()); }
                     else { println!("{:>5} _ TCP RST from {}:{} with extra flags [{}]", p.get_destination(), remoteip, p.get_source(), extra.join(",")); }
                 }
               },
