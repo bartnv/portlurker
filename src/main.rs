@@ -5,12 +5,14 @@ extern crate chrono;
 extern crate libc;
 extern crate nfqueue;
 extern crate pnet;
+extern crate nix;
 
 use std::fmt;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io;
 use std::io::prelude::*;
+use std::os::unix::io::AsRawFd;
 use std::net::{TcpListener, IpAddr};
 use std::process::exit;
 use std::sync::{Arc, RwLock};
@@ -26,6 +28,7 @@ use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::tcp::TcpPacket;
 use pnet::packet::Packet;
+use nix::sys::socket::{setsockopt, sockopt::IpTransparent};
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 const BINARY_MATCHES: [(&str, &str);34] = [ // Global array, so needs an explicit length
@@ -454,6 +457,7 @@ fn main() {
   });
 
   let mut tcp_ports: Vec<u16> = vec![];
+  let mut transparent: bool = false;
   for port in config["ports"].as_vec().unwrap() {
     if !port["tcp"].is_badvalue() {
       let portno = port["tcp"].as_i64().unwrap();
@@ -468,7 +472,16 @@ fn main() {
       let logchan = tx.clone();
       let bind_ip = app.read().unwrap().bind_ip.clone();
       match TcpListener::bind((bind_ip.as_str(), portno as u16)) {
-        Ok(socket) => lurk(app, socket, logchan, banner),
+          Ok(socket) => {
+              if !port["transparent"].is_badvalue() {
+                  transparent = true;
+                  println!("  transparent mode: true");
+                  let fd = socket.as_raw_fd();
+                  let res = setsockopt(fd, IpTransparent, &true);
+                  res.expect("ERROR setting sockopt IP_TRANSPARENT on PROXY socket; are you running as root?");
+              }
+              lurk(app, socket, logchan, banner)
+          },
         Err(e) => { println!("ERROR binding to {}: {}", portno, e.to_string()) }
       };
     }
@@ -483,7 +496,7 @@ fn main() {
   let nfqueue = app.read().unwrap().nfqueue;
   if let Some(qid) = nfqueue {
     let logchan = tx.clone();
-    let mut state = State::new(logchan);
+    let mut state = State::new(logchan, transparent);
     state.ports = tcp_ports.clone();
     let mut q = nfqueue::Queue::new(state);
     q.open();
@@ -526,10 +539,11 @@ fn nfq_callback(msg: &nfqueue::Message, state: &mut State) {
 
 struct State {
     ports: Vec<u16>,
-    logchan: Sender<LogEntry>
+    logchan: Sender<LogEntry>,
+    transparent: bool
 }
 impl State {
-    pub fn new(logchan: Sender<LogEntry>) -> State {
-        State { ports: vec![], logchan }
+    pub fn new(logchan: Sender<LogEntry>, transparent: bool) -> State {
+        State { ports: vec![], logchan, transparent }
     }
 }
