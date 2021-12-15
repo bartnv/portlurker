@@ -3,7 +3,7 @@ extern crate regex;
 extern crate rusqlite;
 extern crate chrono;
 extern crate libc;
-extern crate nfqueue;
+extern crate nfq;
 extern crate pnet;
 extern crate nix;
 
@@ -182,7 +182,7 @@ fn setup() -> App {
                                     remoteip   TEXT NOT NULL,
                                     remoteport INTEGER NOT NULL,
                                     localport  INTEGER NOT NULL
-                                  )", rusqlite::NO_PARAMS).expect("Failed to create table inside database! SQL logging may not function correctly!"); },
+                                )", []).expect("Failed to create table inside database! SQL logging may not function correctly!"); },
         Err(e) => {
           println!("Enabling SQL logging failed because it was not possible to open or create the database: {}\nContinuing without SQL logging", e.to_string());
         },
@@ -498,66 +498,57 @@ fn main() {
     let logchan = tx.clone();
     let mut state = State::new(logchan, transparent);
     state.ports = tcp_ports.clone();
-    let mut q = nfqueue::Queue::new(state);
-    q.open();
-    q.unbind(libc::AF_INET);
+    let mut q = nfq::Queue::open().unwrap();
+    q.bind(qid).expect("Failed to bind to nfqueue");
+    q.set_copy_range(qid, 64).unwrap(); // 64 bits should be sufficient to look at the TCP header
+    loop {
+        let mut msg = q.recv().unwrap();
+        let header = Ipv4Packet::new(msg.get_payload());
+        match header {
+          Some(h) => match h.get_next_level_protocol() {
+            IpNextHeaderProtocols::Tcp => match TcpPacket::new(h.payload()) {
+              Some(p) => {
+                let remoteip = IpAddr::V4(h.get_source());
+                let flags = p.get_flags();
+                if flags&2 != 0 {
+                    let mut extra = Vec::new();
+                    if flags&1 != 0 { extra.push("FIN"); }
+                    if flags&4 != 0 { extra.push("RST"); }
+                    if flags&8 != 0 { extra.push("PSH"); }
+                    if flags&16 != 0 { extra.push("ACK"); }
+                    if flags&32 != 0 { extra.push("URG"); }
+                    let text = match extra.len() {
+                        0 => String::new(),
+                        _ => format!(" with extra flags [{}]", extra.join(","))
+                    };
+                    if !state.transparent && !state.ports.contains(&p.get_destination()) { println!("{:>5} = TCP SYN from {}:{} (unmonitored){}", p.get_destination(), remoteip, p.get_source(), text); }
+                    else { println!("{:>5} = TCP SYN from {}:{}{}", p.get_destination(), remoteip, p.get_source(), text); }
+                    let _ = state.logchan.send(LogEntry { entrytype: LogEntryType::Syn, remoteip: remoteip.to_string(), remoteport: p.get_source(), localport: p.get_destination() });
+                }
+                else if flags&4 != 0 {
+                    let mut extra = Vec::new();
+                    if flags&1 != 0 { extra.push("FIN"); }
+                    if flags&2 != 0 { extra.push("SYN"); }
+                    if flags&8 != 0 { extra.push("PSH"); }
+                    if flags&16 != 0 { extra.push("ACK"); }
+                    if flags&32 != 0 { extra.push("URG"); }
+                    if extra.len() == 0 { println!("{:>5} _ TCP RST from {}:{}", p.get_destination(), remoteip, p.get_source()); }
+                    else { println!("{:>5} _ TCP RST from {}:{} with extra flags [{}]", p.get_destination(), remoteip, p.get_source(), extra.join(",")); }
+                }
+              },
+              None => println!("Received malformed TCP packet")
+            },
+            _ => println!("Received a non-TCP packet")
+          },
+          None => println!("Received malformed IPv4 packet")
+        }
 
-    let rc = q.bind(libc::AF_INET);
-    assert!(rc == 0);
-
-    q.create_queue(qid, nfq_callback);
-    q.set_mode(nfqueue::CopyMode::CopyPacket, 0x00df); // 64 bits should be sufficient to look at the TCP header
-
-    q.run_loop(); // Infinite loop
-    q.close();
+        msg.set_verdict(nfq::Verdict::Accept);
+    }
   }
   else {
     loop { thread::sleep(Duration::new(60, 0)); } // Nothing to do in the main thread
   }
-}
-
-fn nfq_callback(msg: &nfqueue::Message, state: &mut State) {
-   let header = Ipv4Packet::new(msg.get_payload());
-   match header {
-     Some(h) => match h.get_next_level_protocol() {
-       IpNextHeaderProtocols::Tcp => match TcpPacket::new(h.payload()) {
-         Some(p) => {
-           let remoteip = IpAddr::V4(h.get_source());
-           let flags = p.get_flags();
-           if flags&2 != 0 {
-               let mut extra = Vec::new();
-               if flags&1 != 0 { extra.push("FIN"); }
-               if flags&4 != 0 { extra.push("RST"); }
-               if flags&8 != 0 { extra.push("PSH"); }
-               if flags&16 != 0 { extra.push("ACK"); }
-               if flags&32 != 0 { extra.push("URG"); }
-               let text = match extra.len() {
-                   0 => String::new(),
-                   _ => format!(" with extra flags [{}]", extra.join(","))
-               };
-               if !state.transparent && !state.ports.contains(&p.get_destination()) { println!("{:>5} = TCP SYN from {}:{} (unmonitored){}", p.get_destination(), remoteip, p.get_source(), text); }
-               else { println!("{:>5} = TCP SYN from {}:{}{}", p.get_destination(), remoteip, p.get_source(), text); }
-               let _ = state.logchan.send(LogEntry { entrytype: LogEntryType::Syn, remoteip: remoteip.to_string(), remoteport: p.get_source(), localport: p.get_destination() });
-           }
-           else if flags&4 != 0 {
-               let mut extra = Vec::new();
-               if flags&1 != 0 { extra.push("FIN"); }
-               if flags&2 != 0 { extra.push("SYN"); }
-               if flags&8 != 0 { extra.push("PSH"); }
-               if flags&16 != 0 { extra.push("ACK"); }
-               if flags&32 != 0 { extra.push("URG"); }
-               if extra.len() == 0 { println!("{:>5} _ TCP RST from {}:{}", p.get_destination(), remoteip, p.get_source()); }
-               else { println!("{:>5} _ TCP RST from {}:{} with extra flags [{}]", p.get_destination(), remoteip, p.get_source(), extra.join(",")); }
-           }
-         },
-         None => println!("Received malformed TCP packet")
-       },
-       _ => println!("Received a non-TCP packet")
-     },
-     None => println!("Received malformed IPv4 packet")
-   }
-
-   msg.set_verdict(nfqueue::Verdict::Accept);
 }
 
 struct State {
