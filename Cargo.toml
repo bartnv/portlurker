@@ -1,12 +1,13 @@
 [package]
 name = "portlurker"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 authors = ["Bart Noordervliet <bart@mmvi.nl>",
            "Mark Pentler <mark@elmarko.org>"]
 license = "MIT"
 description = "Port listener / honeypot with protocol guessing and safe string display"
 readme = "README.md"
+repository = "https://github.com/bartnv/portlurker"
 
 [dependencies]
 yaml-rust = "0.4"
@@ -17,3 +18,7 @@ nfq = "0.2"
 libc = "0.2"
 pnet = "0.28"
 nix = "0.23"
+
+[package.metadata.deb]
+section = "network"
+priority = "optional"
