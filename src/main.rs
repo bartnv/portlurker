@@ -1,56 +1,63 @@
-use std::fmt;
+#![allow(dead_code, unused_must_use)]
 use std::io;
 use std::error::Error;
 use std::os::unix::io::AsRawFd;
-use std::net::IpAddr;
+use std::net::{ IpAddr, SocketAddr };
 use std::process::exit;
-use std::sync::{ Arc, RwLock };
+use std::sync::{ Arc, RwLock, atomic::Ordering, atomic::AtomicUsize };
 use std::time::{ Duration, Instant };
+use std::ffi::CString;
 use yaml_rust::YamlLoader;
 use regex::bytes::{ RegexSet, RegexSetBuilder };
-use rusqlite::{ Connection, types::ToSql };
-use chrono::Local;
+use chrono::{ Local, Utc, DateTime };
 use pnet::packet::{ Packet, ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, tcp::TcpPacket };
 use nix::sys::socket::{ setsockopt, sockopt::IpTransparent };
 use tokio::{ net::TcpListener, io::AsyncReadExt, io::AsyncWriteExt, sync::mpsc::{channel, Sender, Receiver }, fs::{ File, OpenOptions } };
 use tokio_io_timeout::TimeoutStream;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-const BINARY_MATCHES: [(&str, &str);34] = [ // Global array, so needs an explicit length
-    ("SSL3.0 Record Protocol", r"^\x16\x03\x00..\x01"),
-    ("TLS1.0 Record Protocol", r"^\x16\x03\x01..\x01"),
-    ("TLS1.1 Record Protocol", r"^\x16\x03\x02..\x01"),
-    ("TLS1.2 Record Protocol", r"^\x16\x03\x03..\x01"),
-    ("SSL3.0 CLIENT_HELLO", r"^\x16....\x01...\x03\x00"),
-    ("TLS1.0 CLIENT_HELLO", r"^\x16....\x01...\x03\x01"),
-    ("TLS1.1 CLIENT_HELLO", r"^\x16....\x01...\x03\x02"),
-    ("TLS1.2 CLIENT_HELLO", r"^\x16....\x01...\x03\x03"),
-    ("SMB1 COMMAND NEGOTIATE", r"^....\xffSMB\x72"),
-    ("SMB1 NT_STATUS Success", r"^....\xffSMB.[\x00-\x0f]"),
-    ("SMB1 NT_STATUS Information", r"^....\xffSMB.[\x40-\x4f]"),
-    ("SMB1 NT_STATUS Warning", r"^....\xffSMB.[\x80-\x8f]"),
-    ("SMB1 NT_STATUS Error", r"^....\xffSMB.[\xc0-\xcf]"),
-    ("SMB2 COMMAND NEGOTIATE", r"^\x00...\xfeSMB........\x00\x00"),
-    ("SMB2 NT_STATUS Success", r"^\x00...\xfeSMB....[\x00-\x0f]"),
-    ("SMB2 NT_STATUS Information", r"^\x00...\xfeSMB....[\x40-\x4f]"),
-    ("SMB2 NT_STATUS Warning", r"^\x00...\xfeSMB....[\x80-\x8f]"),
-    ("SMB2 NT_STATUS Error", r"^\x00...\xfeSMB....[\xc0-\xcf]"),
-    ("MS-TDS PRELOGIN Request", r"^\x12\x01\x00.\x00\x00"),
-    ("MS-TDS LOGIN Request", r"^\x10\x01\x00.\x00\x00"),
-    ("SOCKS4 NOAUTH Request", r"^\x04\x01\x00\x50"),
-    ("SOCKS5 NOAUTH Request", r"^\x05\x01\x00$"), // Tested ok-ish
-    ("SOCKS5 USER/PASS Request", r"^\x05\x02\x00\x02$"), // possibly broken
-    ("Bitcoin main chain magic number", r"\xf9\xbe\xb4\xd9"),
-    ("RFB3 (VNC) protocol handshake", r"^RFB 003\.00."),
-    ("HTTP1 GET request", "^GET [^ ]+ HTTP/1"),
-    ("HTTP1 POST request", "^POST [^ ]+ HTTP/1"),
-    ("JSON RPC", r#"\{.*"jsonrpc".*\}"#),
-    ("Android ADB CONNECT", r"^CNXN\x00\x00\x00\x01"),
-    ("MS-RDP Connection Request", "Cookie: mstshash="),
-    ("Generic payload dropper", r"(curl|wget)( |\+|%20)"),
-    ("SQLdict MSSQL brute force tool", r"squelda 1.0"),
-    ("MCTP REMOTE request", r"^REMOTE .*? MCTP/"),
-    ("Kguard DVR auth bypass", r"^REMOTE HI_SRDK_.*? MCTP/")
+const BINARY_MATCHES: [(&str, &str, &str);41] = [ // Global array, so needs an explicit length
+    ("ssl3.0", "SSL3.0 Record Protocol", r"^\x16\x03\x00..\x01"),
+    ("tls1.0", "TLS1.0 Record Protocol", r"^\x16\x03\x01..\x01"),
+    ("tls1.1", "TLS1.1 Record Protocol", r"^\x16\x03\x02..\x01"),
+    ("tls1.2", "TLS1.2 Record Protocol", r"^\x16\x03\x03..\x01"),
+    ("ssl3.0-hello", "SSL3.0 CLIENT_HELLO", r"^\x16....\x01...\x03\x00"),
+    ("tls1.0-hello", "TLS1.0 CLIENT_HELLO", r"^\x16....\x01...\x03\x01"),
+    ("tls1.1-hello", "TLS1.1 CLIENT_HELLO", r"^\x16....\x01...\x03\x02"),
+    ("tls1.2-hello", "TLS1.2 CLIENT_HELLO", r"^\x16....\x01...\x03\x03"),
+    ("tls1.3-preferred", "TLS1.3 preferred", r"^\x16....\x01...\x03\x03.*\x00\x2b...\x03\x04"),
+    ("tls-sni-hostname", "TLS SNI hostname", r"^\x16....\x01...\x03\x03.*\x00\x00..\x00\x11\x00"),
+    ("smb1-comm-nego", "SMB1 COMMAND NEGOTIATE", r"^....\xffSMB\x72"),
+    ("smb1-stat-succ", "SMB1 NT_STATUS Success", r"^....\xffSMB.[\x00-\x0f]"),
+    ("smb1-stat-info", "SMB1 NT_STATUS Information", r"^....\xffSMB.[\x40-\x4f]"),
+    ("smb1-stat-warn", "SMB1 NT_STATUS Warning", r"^....\xffSMB.[\x80-\x8f]"),
+    ("smb1-stat-error", "SMB1 NT_STATUS Error", r"^....\xffSMB.[\xc0-\xcf]"),
+    ("smb2-comm-nego", "SMB2 COMMAND NEGOTIATE", r"^\x00...\xfeSMB........\x00\x00"),
+    ("smb2-stat-succ", "SMB2 NT_STATUS Success", r"^\x00...\xfeSMB....[\x00-\x0f]"),
+    ("smb2-stat-info", "SMB2 NT_STATUS Information", r"^\x00...\xfeSMB....[\x40-\x4f]"),
+    ("smb2-stat-warn", "SMB2 NT_STATUS Warning", r"^\x00...\xfeSMB....[\x80-\x8f]"),
+    ("smb2-stat-error", "SMB2 NT_STATUS Error", r"^\x00...\xfeSMB....[\xc0-\xcf]"),
+    ("mstds-pre-req", "MS-TDS PRELOGIN Request", r"^\x12\x01\x00.\x00\x00"),
+    ("mstds-login-req", "MS-TDS LOGIN Request", r"^\x10\x01\x00.\x00\x00"),
+    ("socks4-noauth", "SOCKS4 NOAUTH Request", r"^\x04\x01\x00\x50"),
+    ("socks5-noauth", "SOCKS5 NOAUTH Request", r"^\x05\x01\x00$"), // Tested ok-ish
+    ("socks5-user", "SOCKS5 USER/PASS Request", r"^\x05\x02\x00\x02$"), // possibly broken
+    ("bitcoin", "Bitcoin main chain magic number", r"\xf9\xbe\xb4\xd9"),
+    ("rfb3", "RFB3 (VNC) protocol handshake", r"^RFB 003\.00."),
+    ("http1.0", "HTTP 1.0 request", "^[^ ]+ [^ ]+ HTTP/1.0"),
+    ("http1.1", "HTTP 1.1 request", "^[^ ]+ [^ ]+ HTTP/1.1"),
+    ("http-get", "HTTP GET request", "^GET [^ ]+ HTTP/"),
+    ("http-post", "HTTP POST request", "^POST [^ ]+ HTTP/"),
+    ("json-rpc", "JSON RPC", r#"\{.*"jsonrpc".*\}"#),
+    ("android-adb", "Android ADB CONNECT", r"^CNXN\x00\x00\x00\x01"),
+    ("msrdp-conn-req", "MS-RDP Connection Request", "Cookie: mstshash="),
+    ("gen-dropper-curl", "Generic payload dropper", r"curl( |\+|%20)"),
+    ("gen-dropper-wget", "Generic payload dropper", r"wget( |\+|%20)"),
+    ("squelda1.0", "SQLdict MSSQL brute force tool", r"squelda 1.0"),
+    ("mctp-remote", "MCTP REMOTE request", r"^REMOTE .*? MCTP/"),
+    ("mctp-kguard-dvr", "Kguard DVR auth bypass", r"^REMOTE HI_SRDK_.*? MCTP/"),
+    ("tcp-cgi", "TCP CGI", r"GATEWAY_INTERFACE"),
+    ("php-exec", "PHP shell exec", r"<?php .*?shell_exec")
 ];
 
 #[derive(Clone)]
@@ -58,6 +65,7 @@ struct App {
     print_ascii: bool,
     print_binary: bool,
     sql_logging: bool,
+    sql_connection: String,
     file_logging: bool,
     nfqueue: Option<u16>,
     bind_ip: String,
@@ -65,34 +73,32 @@ struct App {
     regexset: RegexSet
 }
 
-#[derive(PartialEq, Eq)]
-enum LogEntryType {
-    Syn,
-    Ack
-}
-impl fmt::Display for LogEntryType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            LogEntryType::Syn => write!(f, "SYN"),
-            LogEntryType::Ack => write!(f, "ACK")
-        }
-    }
-}
 struct LogEntry {
-    entrytype: LogEntryType,
+    timestamp: DateTime<Utc>,
+    localip: String,
+    localport: u16,
     remoteip: String,
     remoteport: u16,
-    localport: u16
+    payloadbytes: u16,
+    payloadhash: String,
+    detections: String,
+    termination: &'static str,
+    duration: u32,
 }
-
-#[derive(Clone)]
-struct Port {
-    number: u16,
-    count: u64
-}
-impl PartialEq for Port {
-    fn eq(&self, other: &Port) -> bool {
-        self.number == other.number
+impl LogEntry {
+    fn from(local: SocketAddr, peer: SocketAddr) -> LogEntry {
+        LogEntry {
+            timestamp: Utc::now(),
+            localip: local.ip().to_string(),
+            localport: local.port(),
+            remoteip: peer.ip().to_string(),
+            remoteport: peer.port(),
+            payloadbytes: 0,
+            payloadhash: String::new(),
+            detections: String::new(),
+            termination: "",
+            duration: 0
+        }
     }
 }
 
@@ -161,10 +167,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         print_ascii: false,
         print_binary: false,
         sql_logging: false,
+        sql_connection: String::new(),
         file_logging: false,
         nfqueue: None,
         bind_ip: String::new(),
-        io_timeout: Duration::new(300, 0),
+        io_timeout: Duration::new(125, 0),
         regexset: RegexSet::new(&[] as &[&str])?
     }));
 
@@ -240,20 +247,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         if !config["general"]["sql_logging"].is_badvalue() {
             if config["general"]["sql_logging"].as_bool().unwrap() {
-                match Connection::open("portlurker.sqlite") {
-                    Ok(conn) => {
+                match config["general"]["sql_connection"].as_str() {
+                    Some(conn) => {
                         app.sql_logging = true;
-                        println!("Logging to local SQL database file portlurker.sqlite");
-                        conn.execute("CREATE TABLE IF NOT EXISTS connections (
-                            id         INTEGER PRIMARY KEY,
-                            time       INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-                            remoteip   TEXT NOT NULL,
-                            remoteport INTEGER NOT NULL,
-                            localport  INTEGER NOT NULL
-                        )", []).expect("Failed to create table inside database! SQL logging may not function correctly!");
+                        app.sql_connection = conn.to_owned();
+                        println!("Logging to SQL database connection {}", conn);
                     },
-                    Err(e) => {
-                        println!("Enabling SQL logging failed because it was not possible to open or create the database: {}\nContinuing without SQL logging", e.to_string());
+                    None => {
+                        println!("No valid SQL connection string found; continuing without SQL logging");
                     }
                 };
             }
@@ -274,7 +275,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
 
         let mut patterns = Vec::with_capacity(BINARY_MATCHES.len());
-        for &(_, pattern) in BINARY_MATCHES.iter() {
+        for &(_, _, pattern) in BINARY_MATCHES.iter() {
             patterns.push(pattern);
         }
         app.regexset = RegexSetBuilder::new(patterns)
@@ -285,14 +286,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Start logging thread
     let (tx, rx) = channel(100);
-    let sql_logging = app.read().unwrap().sql_logging;
-    let file_logging = app.read().unwrap().file_logging;
-    let logger = tokio::spawn(async move { log(rx, sql_logging, file_logging).await });
+    {
+        let app = app.read().unwrap();
+        let params = (app.sql_logging, app.sql_connection.clone(), app.file_logging);
+        tokio::spawn(async move { log(rx, params.0, params.1, params.2).await });
+    }
 
     println!("\nStarting listeners on the following ports:");
-
     let mut tcp_ports: Vec<u16> = vec![];
     let mut transparent: bool = false;
+    let count = Arc::new(AtomicUsize::new(0));
     for port in config["ports"].as_vec().unwrap() {
         if let Some(portno) = port["tcp"].as_i64() {
             tcp_ports.push(portno as u16);
@@ -314,7 +317,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         let res = setsockopt(fd, IpTransparent, &true);
                         res.expect("ERROR setting sockopt IP_TRANSPARENT on TPROXY socket; are you running as root?");
                     }
-                    lurk(app, socket, logchan, banner)
+                    lurk(app, socket, logchan, banner, count.clone())
                 },
                 Err(e) => { println!("ERROR binding to {}: {}", portno, e.to_string()) }
             };
@@ -329,7 +332,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let nfqueue = app.read().unwrap().nfqueue;
     if let Some(qid) = nfqueue {
-        let nfq = tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             let mut state = State::new(tx, transparent);
             state.ports = tcp_ports.clone();
             let mut q = nfq::Queue::open().expect("Failed to open nfqueue");
@@ -357,7 +360,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     };
                                     if !state.transparent && !state.ports.contains(&p.get_destination()) { println!("{:>5} = TCP SYN from {}:{} (unmonitored){}", p.get_destination(), remoteip, p.get_source(), text); }
                                     else { println!("{:>5} = TCP SYN from {}:{}{}", p.get_destination(), remoteip, p.get_source(), text); }
-                                    let _ = state.logchan.send(LogEntry { entrytype: LogEntryType::Syn, remoteip: remoteip.to_string(), remoteport: p.get_source(), localport: p.get_destination() });
+                                    // let _ = state.logchan.send(LogEntry { entrytype: LogEntryType::Syn, remoteip: remoteip.to_string(), remoteport: p.get_source(), localport: p.get_destination() });
                                 }
                                 else if flags&4 != 0 {
                                     let mut extra = Vec::new();
@@ -381,23 +384,37 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 q.verdict(msg).expect("Failed to send verdict on nfqueue");
             }
         });
-        nfq.await?
     }
 
-    logger.await?;
-    Ok(())
+    let mut interval = tokio::time::interval(Duration::from_secs(30));
+    loop {
+        interval.tick().await;
+        if let Ok(title) = CString::new(format!("PortLurker [{}]", count.load(Ordering::Relaxed)).as_bytes()) {
+            unsafe {
+                libc::prctl(libc::PR_SET_NAME, title.as_ptr(), 0, 0, 0)
+            };
+        }
+    }
 }
 
-fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, banner: Arc<String>) {
+fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, banner: Arc<String>, count: Arc<AtomicUsize>) {
     tokio::spawn(async move {
         let io_timeout = app.read().unwrap().io_timeout;
         loop {
             let mut stream = match socket.accept().await {
-                Ok(stream) => TimeoutStream::new(stream.0),
-                Err(e) => { println!("{:>5} ? TCP ERR ACCEPT: {}", match socket.local_addr() { Ok(a) => a.port(), Err(_) => 0 }, e.to_string()); continue; }
+                Ok(stream) => Box::pin(TimeoutStream::new(stream.0)),
+                Err(e) if e.to_string() == "Too many open files" => {
+                    println!("{:>5} ? TCP ERR ACCEPT: {}", match socket.local_addr() { Ok(a) => a.port(), Err(_) => 0 }, e);
+                    tokio::time::sleep(Duration::from_secs(1));
+                    continue;
+                }
+                Err(e) => {
+                    println!("{:>5} ? TCP ERR ACCEPT: {}", match socket.local_addr() { Ok(a) => a.port(), Err(_) => 0 }, e);
+                    continue;
+                }
             };
-            stream.set_read_timeout(Some(io_timeout));
-            stream.set_write_timeout(Some(io_timeout));
+            stream.as_mut().set_read_timeout_pinned(Some(io_timeout));
+            stream.as_mut().set_write_timeout_pinned(Some(io_timeout));
             let local = match stream.get_ref().local_addr() { Ok(a) => a, Err(_) => continue };
             let peer = match stream.get_ref().peer_addr() {
                 Ok(addr) => addr,
@@ -405,32 +422,47 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
             };
 
             println!("{:>5} + TCP ACK from {}", local.port(), peer);
-            if logchan.send(LogEntry { entrytype: LogEntryType::Ack, remoteip: peer.ip().to_string(), remoteport: peer.port(), localport: local.port() }).await.is_err() {
-                println!("Failed to write LogEntry to logging thread");
-            }
+            count.fetch_add(1, Ordering::Relaxed);
+            let mut logentry = LogEntry::from(local, peer);
 
             let app = app.clone();
             let banner = banner.clone();
+            let count = count.clone();
+            let logchan = logchan.clone();
             tokio::spawn(async move {
                 let start = Instant::now();
                 if banner.len() > 0 {
-                    match stream.get_mut().write((*banner).as_bytes()).await {
+                    match stream.write((*banner).as_bytes()).await {
                         Ok(_) => println!("{:>5} > {}", local.port(), to_dotline((*banner).as_bytes())),
                         Err(e) => {
-                            if e.kind() == io::ErrorKind::WouldBlock { println!("{:>5} - TCP WRITE TIMEOUT from {}", local.port(), peer); }
-                            else { println!("{:>5} - TCP ERR WRITE to {}: {}", local.port(), peer, e.to_string()); }
+                            logentry.termination = match e.kind() {
+                                io::ErrorKind::TimedOut => {
+                                    println!("{:>5} - TCP WRITE TIMEOUT from {}", local.port(), peer);
+                                    "write-timeout"
+                                }
+                                _ => {
+                                    println!("{:>5} - TCP ERR WRITE to {}: {}", local.port(), peer, e.to_string());
+                                    "write-error"
+                                }
+                            };
+                            logentry.duration = start.elapsed().as_millis() as u32;
+                            logchan.send(logentry).await;
+                            count.fetch_sub(1, Ordering::Relaxed);
                             return;
                         }
                     }
                 }
                 let mut buf: [u8; 2048] = [0; 2048];
+                let mut detections: Vec<&str> = vec![];
                 loop {
-                    match stream.get_mut().read(&mut buf).await {
+                    match stream.read(&mut buf).await {
                         Ok(c) => {
-                            if c == 0 {                                                            // use Duration::as_float_secs() here as soon as it stabilizes
-                                println!("{:>5} - TCP FIN from {} after {:.1}s", local.port(), peer, start.elapsed().as_secs() as f32 + start.elapsed().subsec_millis() as f32/1000.0);
+                            if c == 0 {
+                                println!("{:>5} - TCP FIN from {} after {:.1}s", local.port(), peer, start.elapsed().as_secs_f32());
+                                logentry.termination = "closed";
                                 break;
                             }
+                            logentry.payloadbytes += c as u16;
                             let mut printables = Vec::new();
                             let mut found = false;
                             let mut mbfound = false;
@@ -487,84 +519,69 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
                                 }
                             }
                             for id in app.read().unwrap().regexset.matches(&buf[..c]).into_iter() {
-                                println!("{:>5} ^ Matches pattern {}", local.port(), BINARY_MATCHES[id].0);
+                                println!("{:>5} ^ Matches pattern {}", local.port(), BINARY_MATCHES[id].1);
+                                detections.push(BINARY_MATCHES[id].0);
                             }
                         }
                         Err(e) => {
-                            if e.kind() == io::ErrorKind::WouldBlock { println!("{:>5} - TCP READ TIMEOUT from {}", local.port(), peer); }
-                            else { println!("{:>5} - TCP ERR READ from {}: {}", local.port(), peer, e.to_string()); }
+                            logentry.termination = match e.kind() {
+                                io::ErrorKind::TimedOut => {
+                                    println!("{:>5} - TCP READ TIMEOUT from {}", local.port(), peer);
+                                    "read-timeout"
+                                }
+                                _ => {
+                                    println!("{:>5} - TCP ERR READ from {}: {}", local.port(), peer, e.to_string());
+                                    "read-error"
+                                }
+                            };
                             break;
                         }
                     }
-                    // match stream.get_ref().take_error() {
-                    //     Ok(opt) => {
-                    //         if let Some(err) = opt {
-                    //             println!("{:>5} - TCP ERR from {}: {}", local.port(), peer, err.to_string());
-                    //             break;
-                    //         }
-                    //     }
-                    //     Err(_) => {
-                    //         eprintln!("This shouldn't happen...");
-                    //         break;
-                    //     }
-                    // }
                 }
+                logentry.duration = start.elapsed().as_millis() as u32;
+                detections.sort_unstable();
+                detections.dedup();
+                logentry.detections = detections.join(",");
+                logchan.send(logentry).await;
+                count.fetch_sub(1, Ordering::Relaxed);
             });
         }
     });
 }
 
-async fn log(mut rx: Receiver<LogEntry>, mut sql_logging: bool, file_logging: bool) {
-    let mut counter = 0;
-    let mut ports = Vec::with_capacity(65536);
-    for number in 0..=65535 { ports.push(Port { number, count: 0 }) };
-    let mut prevports: Vec<Port> = Vec::new();
+async fn log(mut rx: Receiver<LogEntry>, sql_logging: bool, sql_connection: String, file_logging: bool) {
+    use sqlx::{ Connection, AnyConnection };
+
+    let mut db = match sql_logging {
+        true => match AnyConnection::connect(&sql_connection).await {
+            Ok(conn) => Some(conn),
+            Err(_) => {
+                eprintln!("Failed to connect to SQL database with {}", sql_connection);
+                None
+            }
+        }
+        false => None
+    };
 
     loop {
         let conn: LogEntry = rx.recv().await.unwrap();
 
-        if conn.entrytype == LogEntryType::Syn {
-            ports[conn.localport as usize].count += 1;
-            counter += 1;
-            if counter%100 == 0 {
-                let mut ports = ports.clone();
-                ports.sort_unstable_by_key(|k| -(k.count as i64));
-                ports.truncate(10);
-                ports.shrink_to_fit();
-                println!("----- i Top 10 ports:");
-                let mut i = 0;
-                for port in &ports {
-                    i += 1;
-                    println!("----- i No {:>2}: {:>5} with {:>3} SYNs", i, port.number, port.count);
-                    if !prevports.is_empty() && !prevports.contains(port) { println!("----- i  Port {:>5} newly entered the top 10", port.number); }
-                }
-                prevports = ports;
-            }
-        }
-
         if file_logging {
-            let current_time = Local::now();
-            let formatted_time = format!("{}", current_time.format("%a %d %b %Y - %H:%M.%S"));
-            let log_msg = format!("[{}]: {} TCP {} from {}:{}\n", formatted_time, conn.entrytype, conn.localport, conn.remoteip, conn.remoteport);
+            let log_msg = format!("{} TCP {}:{:<5} from {}:{:<5} {:.1}s {}b {} {}\n", Local::now().format("%Y-%m-%d %H:%M:%S"), conn.localip, conn.localport, conn.remoteip, conn.remoteport, conn.duration as f32/1000.0, conn.payloadbytes, conn.termination, conn.detections);
             let mut file = OpenOptions::new()
             .append(true)
             .create(true)
             .open("portlurker.log").await.expect("Failed to open local log file for writing");
             file.write_all(log_msg.as_bytes()).await.expect("Failed to write to log file");
         }
-        if sql_logging && (conn.entrytype == LogEntryType::Ack) {
-            match Connection::open("portlurker.sqlite") {
-                Ok(dbh) => {
-                    dbh.execute("INSERT INTO connections (
-                    remoteip, remoteport, localport) VALUES (
-                        ?1, ?2, ?3)", &[&conn.remoteip as &dyn ToSql, &conn.remoteport, &conn.localport]
-                    ).expect("Can't write new row into table! Subsequent logging may also fail.");
-                },
-                Err(e) => {
-                    println!("Failed to open database: {} - Continuing without logging", e.to_string());
-                    sql_logging = false;
-                }
-            }
+        if let Some(ref mut db) = db {
+            sqlx::query("INSERT INTO connections (timestamp, localip, localport, remoteip, remoteport) VALUES (?, ?, ?, ?, ?)")
+                .bind(conn.timestamp)
+                .bind(conn.localip)
+                .bind(conn.localport as i32) // Postgres doesn't support unsigned integers so we go from u16 to i32
+                .bind(conn.remoteip)
+                .bind(conn.remoteport as i32)
+                .execute(db).await;
         }
     }
 }

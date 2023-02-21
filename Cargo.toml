@@ -12,7 +12,6 @@ repository = "https://github.com/bartnv/portlurker"
 [dependencies]
 yaml-rust = "0.4"
 regex = "1"
-rusqlite = "0.26"
 chrono = "0.4"
 nfq = "0.2"
 libc = "0.2"
@@ -20,6 +19,7 @@ pnet = "0.28"
 nix = "0.23"
 tokio = { version = "1", features = [ "rt-multi-thread", "fs", "io-util", "sync", "net", "macros" ] }
 tokio-io-timeout = "1"
+sqlx = { version = "0.5", features = [ "runtime-tokio-rustls", "any", "postgres", "mysql", "sqlite", "chrono" ] }
 
 [package.metadata.deb]
 section = "network"
