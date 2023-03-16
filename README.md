@@ -46,3 +46,15 @@ iptables -A INPUT -p tcp -m tcp ! --dport 22 --tcp-flags FIN,SYN,RST,ACK SYN -j 
 ```
 I've exempted the SSH port here to prevent you from locking yourself out of the system. This is prudent because in principle this rule requires portlurker to be running at all times. The '--queue-bypass' option is also a safeguard,
 but I think it only kicks in once the queue is full.
+
+## Docker
+- modify the config.yml-default file according to your needs.
+- build the portlurker docker image:
+     ```sh
+     docker build -t portlurker:latest .
+     ```
+- run the image that was built in the previous step (define the port mapping according to the config.yml-default file):
+     ```sh
+     docker run -p 80:80 -p 443:443 -p 445:445 -p 3389:3389 -p 16992:16992 -p 16993:16993 -p 53:53/udp portlurker:latest
+     ```
+
