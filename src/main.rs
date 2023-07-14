@@ -576,7 +576,7 @@ async fn log(mut rx: Receiver<LogEntry>, sql_logging: bool, sql_connection: Stri
         }
         if let Some(ref mut db) = db {
             sqlx::query("INSERT INTO connections (timestamp, localip, localport, remoteip, remoteport) VALUES (?, ?, ?, ?, ?)")
-                .bind(conn.timestamp)
+                .bind(conn.timestamp.to_string())
                 .bind(conn.localip)
                 .bind(conn.localport as i32) // Postgres doesn't support unsigned integers so we go from u16 to i32
                 .bind(conn.remoteip)

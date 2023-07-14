@@ -19,7 +19,7 @@ pnet = "0.33"
 nix = "0.26"
 tokio = { version = "1", features = [ "rt-multi-thread", "fs", "io-util", "sync", "net", "macros" ] }
 tokio-io-timeout = "1"
-sqlx = { version = "0.6", features = [ "runtime-tokio-rustls", "any", "postgres", "mysql", "sqlite", "chrono" ] }
+sqlx = { version = "0.7", features = [ "runtime-tokio-rustls", "any", "postgres", "mysql", "sqlite", "chrono" ] }
 
 [package.metadata.deb]
 section = "network"
