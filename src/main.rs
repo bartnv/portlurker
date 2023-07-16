@@ -315,7 +315,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         println!("  transparent mode: true");
                         let fd = socket.as_raw_fd();
                         let res = setsockopt(fd, IpTransparent, &true);
-                        res.expect("ERROR setting sockopt IP_TRANSPARENT on TPROXY socket; are you running as root?");
+                        res.expect("ERROR setting sockopt IP_TRANSPARENT on TPROXY socket; this feature requires cap_net_raw or root privilege");
                     }
                     lurk(app, socket, logchan, banner, count.clone())
                 },
@@ -336,7 +336,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let mut state = State::new(tx, transparent);
             state.ports = tcp_ports.clone();
             let mut q = nfq::Queue::open().expect("Failed to open nfqueue");
-            q.bind(qid).expect("Failed to bind to nfqueue");
+            q.bind(qid).expect("ERROR binding nfqueue; this feature requires cap_net_admin or root privilege");
             q.set_copy_range(qid, 64).expect("Failed to set_copy_range on nfqueue"); // 64 bits should be sufficient to look at the TCP header
             loop {
                 let mut msg = q.recv().expect("Failed to receive from nfqueue");
