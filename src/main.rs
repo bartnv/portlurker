@@ -375,7 +375,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             },
                             None => println!("Received malformed TCP packet")
                         },
-                        _ => println!("Received a non-TCP packet")
+                        _ => println!("Received a non-TCP packet: {:?}", h)
                     },
                     None => println!("Received malformed IPv4 packet")
                 }
