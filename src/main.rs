@@ -8,7 +8,7 @@ use std::sync::{ Arc, RwLock, atomic::Ordering, atomic::AtomicUsize };
 use std::time::{ Duration, Instant };
 use std::ffi::CString;
 use yaml_rust::YamlLoader;
-use regex::bytes::{ RegexSet, RegexSetBuilder };
+use regex::{ Regex, bytes::{ RegexSet, RegexSetBuilder } };
 use chrono::{ Local, Utc, DateTime };
 use pnet::packet::{ Packet, ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, tcp::TcpPacket };
 use nix::sys::socket::{ setsockopt, sockopt::IpTransparent };
@@ -16,11 +16,9 @@ use tokio::{ net::TcpListener, io::AsyncReadExt, io::AsyncWriteExt, sync::mpsc::
 use tokio_io_timeout::TimeoutStream;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-const BINARY_MATCHES: [(&str, &str, &str);41] = [ // Global array, so needs an explicit length
-    ("ssl3.0", "SSL3.0 Record Protocol", r"^\x16\x03\x00..\x01"),
-    ("tls1.0", "TLS1.0 Record Protocol", r"^\x16\x03\x01..\x01"),
-    ("tls1.1", "TLS1.1 Record Protocol", r"^\x16\x03\x02..\x01"),
-    ("tls1.2", "TLS1.2 Record Protocol", r"^\x16\x03\x03..\x01"),
+const BINARY_MATCHES: [(&str, &str, &str);39] = [ // Global array, so needs an explicit length
+    ("ssl3", "SSL3 Record Protocol", r"^\x16\x03\x00..\x01"),
+    ("tls1", "TLS1 Record Protocol", r"^\x16\x03\x01..\x01"),
     ("ssl3.0-hello", "SSL3.0 CLIENT_HELLO", r"^\x16....\x01...\x03\x00"),
     ("tls1.0-hello", "TLS1.0 CLIENT_HELLO", r"^\x16....\x01...\x03\x01"),
     ("tls1.1-hello", "TLS1.1 CLIENT_HELLO", r"^\x16....\x01...\x03\x02"),
@@ -83,7 +81,7 @@ struct LogEntry {
     payloadhash: String,
     detections: String,
     termination: &'static str,
-    duration: u32,
+    duration: u32, // milliseconds
 }
 impl LogEntry {
     fn from(local: SocketAddr, peer: SocketAddr) -> LogEntry {
@@ -251,7 +249,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     Some(conn) => {
                         app.sql_logging = true;
                         app.sql_connection = conn.to_owned();
-                        println!("Logging to SQL database connection {}", conn);
+                        sqlx::any::install_default_drivers();
+                        println!("Logging to SQL database connection {}", Regex::new(r":[^:]+@").unwrap().replace(conn, ":****@"));
                     },
                     None => {
                         println!("No valid SQL connection string found; continuing without SQL logging");
@@ -575,12 +574,16 @@ async fn log(mut rx: Receiver<LogEntry>, sql_logging: bool, sql_connection: Stri
             file.write_all(log_msg.as_bytes()).await.expect("Failed to write to log file");
         }
         if let Some(ref mut db) = db {
-            sqlx::query("INSERT INTO connections (timestamp, localip, localport, remoteip, remoteport) VALUES (?, ?, ?, ?, ?)")
-                .bind(conn.timestamp.to_string())
+            sqlx::query("INSERT INTO connection (timestamp, localip, localport, remoteip, remoteport, duration, bytes, termination, detections) VALUES ($1::timestamptz, $2, $3, $4, $5, $6, $7, $8, $9)")
+                .bind(conn.timestamp.to_rfc3339_opts(chrono::SecondsFormat::Secs, false))
                 .bind(conn.localip)
                 .bind(conn.localport as i32) // Postgres doesn't support unsigned integers so we go from u16 to i32
                 .bind(conn.remoteip)
                 .bind(conn.remoteport as i32)
+                .bind(conn.duration as i64)
+                .bind(conn.payloadbytes as i32)
+                .bind(conn.termination)
+                .bind(conn.detections)
                 .execute(db).await;
         }
     }
