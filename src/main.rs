@@ -1,7 +1,6 @@
 #![allow(dead_code, unused_must_use)]
 use std::io;
 use std::error::Error;
-use std::os::unix::io::AsRawFd;
 use std::net::{ IpAddr, SocketAddr };
 use std::process::exit;
 use std::sync::{ Arc, RwLock, atomic::Ordering, atomic::AtomicUsize };
@@ -312,8 +311,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     if let Some(bool) = port["transparent"].as_bool() {
                         transparent = bool;
                         println!("  transparent mode: true");
-                        let fd = socket.as_raw_fd();
-                        let res = setsockopt(fd, IpTransparent, &true);
+                        let res = setsockopt(&socket, IpTransparent, &true);
                         res.expect("ERROR setting sockopt IP_TRANSPARENT on TPROXY socket; this feature requires cap_net_raw or root privilege");
                     }
                     lurk(app, socket, logchan, banner, count.clone())
