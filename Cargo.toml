@@ -10,7 +10,7 @@ readme = "README.md"
 repository = "https://github.com/bartnv/portlurker"
 
 [dependencies]
-yaml-rust = "0.4"
+yaml-rust2 = "0"
 regex = "1"
 chrono = "0.4"
 nfq = "0.2"

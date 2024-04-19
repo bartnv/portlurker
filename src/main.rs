@@ -6,7 +6,7 @@ use std::process::exit;
 use std::sync::{ Arc, RwLock, atomic::Ordering, atomic::AtomicUsize };
 use std::time::{ Duration, Instant };
 use std::ffi::CString;
-use yaml_rust::YamlLoader;
+use yaml_rust2::YamlLoader;
 use regex::{ Regex, bytes::{ RegexSet, RegexSetBuilder } };
 use chrono::{ Local, Utc, DateTime };
 use pnet::packet::{ Packet, ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, tcp::TcpPacket };
