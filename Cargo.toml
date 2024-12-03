@@ -15,11 +15,11 @@ regex = "1"
 chrono = "0.4"
 nfq = "0.2"
 libc = "0.2"
-pnet = "0.34"
-nix = { version = "0.28", features = [ "socket", "net" ] }
+pnet = "0.35"
+nix = { version = "0.29", features = [ "socket", "net" ] }
 tokio = { version = "1", features = [ "rt-multi-thread", "fs", "io-util", "sync", "net", "macros" ] }
 tokio-io-timeout = "1"
-sqlx = { version = "0.7", features = [ "runtime-tokio-rustls", "any", "postgres", "mysql", "sqlite", "chrono" ] }
+sqlx = { version = "0.8", features = [ "runtime-tokio-rustls", "any", "postgres", "mysql", "sqlite", "chrono" ] }
 
 [package.metadata.deb]
 section = "network"
