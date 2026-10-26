@@ -504,7 +504,7 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
                                 }
                             }
                             if found { printables.push(&buf[start..c]); }
-                            if printables.len() == 1 && printables[0].len() == c {
+                            if printables.len() == 1 && printables[0].len() == c { // Entire payload is printable ascii
                                 if app.read().unwrap().print_ascii {
                                     let data = String::from_utf8_lossy(printables[0]);
                                     for line in data.lines() {
@@ -519,7 +519,11 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
                                     if printable.len() > 3 {
                                         let data = String::from_utf8_lossy(printable);
                                         for line in data.lines() {
-                                            println!("{:>5} $ {}", local.port(), line);
+                                            println!("{:>5} $ {}", local.port(), line.chars().map(|c| match c {
+                                                '\r' => '←',
+                                                '\n' => '↓',
+                                                c => c
+                                            }).collect::<String>());
                                         }
                                     }
                                 }
