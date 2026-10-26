@@ -67,7 +67,9 @@ struct App {
     nfqueue: Option<u16>,
     bind_ip: String,
     io_timeout: Duration,
-    regexset: RegexSet
+    regexset: RegexSet,
+    syntotal: Arc<AtomicUsize>,
+    contotal: Arc<AtomicUsize>,
 }
 
 struct LogEntry {
@@ -169,7 +171,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         nfqueue: None,
         bind_ip: String::new(),
         io_timeout: Duration::new(125, 0),
-        regexset: RegexSet::new(&[] as &[&str])?
+        regexset: RegexSet::new(&[] as &[&str])?,
+        syntotal: Arc::new(AtomicUsize::new(0)),
+        contotal: Arc::new(AtomicUsize::new(0)),
     }));
 
     let mut config_str = String::new();
@@ -328,7 +332,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let nfqueue = app.read().unwrap().nfqueue;
-    if let Some(qid) = nfqueue {
+    let syntotal = app.read().unwrap().syntotal.clone();
+    if let Some(qid) = nfqueue { // Nfqueue feature is enabled
         tokio::task::spawn_blocking(move || {
             let mut state = State::new(tx, transparent);
             state.ports = tcp_ports.clone();
@@ -357,6 +362,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     };
                                     if !state.transparent && !state.ports.contains(&p.get_destination()) { println!("{:>5} = TCP SYN from {}:{} (unmonitored){}", p.get_destination(), remoteip, p.get_source(), text); }
                                     else { println!("{:>5} = TCP SYN from {}:{}{}", p.get_destination(), remoteip, p.get_source(), text); }
+                                    syntotal.fetch_add(1, Ordering::Relaxed);
                                     // let _ = state.logchan.send(LogEntry { entrytype: LogEntryType::Syn, remoteip: remoteip.to_string(), remoteport: p.get_source(), localport: p.get_destination() });
                                 }
                                 else if flags&4 != 0 {
@@ -384,8 +390,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let mut interval = tokio::time::interval(Duration::from_secs(30));
+    let mut n = 0;
     loop {
         interval.tick().await;
+        n += 1;
+        if n%10 == 0 {
+            let app = app.read().unwrap();
+            let syn = app.syntotal.load(Ordering::Relaxed);
+            let con = app.contotal.load(Ordering::Relaxed);
+            if syn > 0 { println!("======= {} total connections received (+ {} SYN only scans)", con, syn-con); }
+            else { println!("======= {} total connections received", con); }
+        }
         if let Ok(title) = CString::new(format!("PortLurker [{}]", count.load(Ordering::Relaxed)).as_bytes()) {
             unsafe {
                 libc::prctl(libc::PR_SET_NAME, title.as_ptr(), 0, 0, 0)
@@ -420,6 +435,7 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
 
             println!("{:>5} + TCP ACK from {}", local.port(), peer);
             count.fetch_add(1, Ordering::Relaxed);
+            app.read().unwrap().contotal.fetch_add(1, Ordering::Relaxed);
             let mut logentry = LogEntry::from(local, peer);
 
             let app = app.clone();
