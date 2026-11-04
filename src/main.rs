@@ -169,6 +169,34 @@ fn to_dotline(bytes: &[u8]) -> String {
     result
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CharClass {
+    Lower,
+    Upper,
+    Digit,
+    Other
+}
+fn classify_char(c: char) -> CharClass {
+    match c {
+        'a'..='z' => CharClass::Lower,
+        'A'..='Z' => CharClass::Upper,
+        '0'..='9' => CharClass::Digit,
+        _ => CharClass::Other
+    }
+}
+fn randomness_score(text: &str) -> f64 {
+    let characters = text.len();
+    if characters < 2 { return 0.0; }
+    let mut transitions = 0;
+    let mut prev_class = CharClass::Lower;
+    for c in text.chars() {
+        let current_class = classify_char(c);
+        if current_class == CharClass::Other || prev_class != current_class { transitions += 1; }
+        prev_class = current_class;
+    }
+    transitions as f64 / characters as f64
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     println!("Portlurker v{}", VERSION);
@@ -553,14 +581,16 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
                             else {
                                 println!("{:>5} ! Read {} bytes of binary", local.port(), c);
                                 for printable in printables {
-                                    if printable.len() > 3 {
+                                    if printable.len() > 3 { // len() in bytes
                                         let data = String::from_utf8_lossy(printable);
                                         for line in data.lines() {
-                                            println!("{:>5} $ {}", local.port(), line.chars().map(|c| match c {
+                                            if line.chars().count() < 4 { continue; } // count unicode codepoints
+                                            if randomness_score(line) > 0.7 { continue; } // Most likely random data
+                                            println!("{:>5} $ {} [{:.2}]", local.port(), line.chars().map(|c| match c {
                                                 '\r' => '←',
-                                                '\n' => '↓',
                                                 c => c
-                                            }).collect::<String>());
+                                            }).collect::<String>(),
+                                            randomness_score(line));
                                         }
                                     }
                                 }
