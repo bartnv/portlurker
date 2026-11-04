@@ -1,14 +1,16 @@
 #![allow(dead_code, unused_must_use)]
-use std::io;
+use std::collections::HashMap;
 use std::error::Error;
+use std::ffi::CString;
+use std::io;
 use std::net::{ IpAddr, SocketAddr };
 use std::process::exit;
 use std::sync::{ Arc, RwLock, atomic::Ordering, atomic::AtomicUsize };
 use std::time::{ Duration, Instant };
-use std::ffi::CString;
+use nix::sys::socket::sockopt::Linger;
 use yaml_rust2::YamlLoader;
 use regex::{ Regex, bytes::{ RegexSet, RegexSetBuilder } };
-use chrono::{ Local, Utc, DateTime };
+use chrono::{ DateTime, Local, Utc };
 use pnet::packet::{ Packet, ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, tcp::TcpPacket };
 use nix::sys::socket::{ setsockopt, sockopt::IpTransparent };
 use tokio::{ net::TcpListener, io::AsyncReadExt, io::AsyncWriteExt, sync::mpsc::{channel, Sender, Receiver }, fs::{ File, OpenOptions } };
@@ -57,7 +59,6 @@ const BINARY_MATCHES: [(&str, &str, &str);39] = [ // Global array, so needs an e
     ("php-exec", "PHP shell exec", r"<?php .*?shell_exec")
 ];
 
-#[derive(Clone)]
 struct App {
     print_ascii: bool,
     print_binary: bool,
@@ -70,6 +71,18 @@ struct App {
     regexset: RegexSet,
     syntotal: Arc<AtomicUsize>,
     contotal: Arc<AtomicUsize>,
+    sources: HashMap<String, Source>
+}
+
+struct Source {
+    ip: String,
+    count: usize,
+    lastseen: DateTime<Local>
+}
+impl Source {
+    fn new(ip: String) -> Source {
+        Source { ip: ip, count: 1, lastseen: Local::now() }
+    }
 }
 
 struct LogEntry {
@@ -174,6 +187,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         regexset: RegexSet::new(&[] as &[&str])?,
         syntotal: Arc::new(AtomicUsize::new(0)),
         contotal: Arc::new(AtomicUsize::new(0)),
+        sources: HashMap::new()
     }));
 
     let mut config_str = String::new();
@@ -389,17 +403,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
         });
     }
 
-    let mut interval = tokio::time::interval(Duration::from_secs(30));
+    let mut interval = tokio::time::interval(Duration::from_secs(60));
     let mut n = 0;
     loop {
         interval.tick().await;
         n += 1;
-        if n%10 == 0 {
-            let app = app.read().unwrap();
-            let syn = app.syntotal.load(Ordering::Relaxed);
-            let con = app.contotal.load(Ordering::Relaxed);
-            if syn > 0 { println!("======= {} total connections received (+ {} SYN only scans)", con, syn-con); }
-            else { println!("======= {} total connections received", con); }
+        if n%5 == 0 {
+            let mut app = app.write().unwrap();
+            let syn = match n%60 == 0 {
+                true => app.syntotal.swap(0, Ordering::Relaxed),
+                false => app.syntotal.load(Ordering::Relaxed)
+            };
+            let con = match n%60 == 0 {
+                true => app.contotal.swap(0, Ordering::Relaxed),
+                false => app.contotal.load(Ordering::Relaxed)
+            };
+            if syn > 0 { println!("======= {} connections from {} hosts (+ {} SYN only scans) in the last 60 mins", con, app.sources.len(), syn-con); }
+            else { println!("======= {} connections from {} hosts in the last 60 mins", con, app.sources.len()); }
+
+            let cutoff = Local::now()-Duration::from_mins(60);
+            println!("Trimming sources...");
+            app.sources.retain(|_, v| v.lastseen > cutoff);
+            println!("After: {}", app.sources.len());
         }
         if let Ok(title) = CString::new(format!("PortLurker [{}]", count.load(Ordering::Relaxed)).as_bytes()) {
             unsafe {
@@ -414,7 +439,10 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
         let io_timeout = app.read().unwrap().io_timeout;
         loop {
             let mut stream = match socket.accept().await {
-                Ok(stream) => Box::pin(TimeoutStream::new(stream.0)),
+                Ok(stream) => {
+                    setsockopt(&stream.0, Linger, &libc::linger { l_onoff: 1, l_linger: 0 });
+                    Box::pin(TimeoutStream::new(stream.0))
+                },
                 Err(e) if e.to_string() == "Too many open files" => {
                     println!("{:>5} ? TCP ERR ACCEPT: {}", match socket.local_addr() { Ok(a) => a.port(), Err(_) => 0 }, e);
                     tokio::time::sleep(Duration::from_secs(1));
@@ -434,8 +462,17 @@ fn lurk(app: Arc<RwLock<App>>, socket: TcpListener, logchan: Sender<LogEntry>, b
             };
 
             println!("{:>5} + TCP ACK from {}", local.port(), peer);
+            {
+                let mut app = app.write().unwrap();
+                app.contotal.fetch_add(1, Ordering::Relaxed);
+                let ip = peer.ip().to_string();
+                let source = app.sources.entry(ip.clone()).and_modify(|e| { e.count += 1; e.lastseen = Local::now(); }).or_insert(Source::new(ip));
+                if source.count > 100 {
+                    println!("{:>5} ~ TCP RESET to {} ({} connections in 60 mins)", local.port(), peer, source.count);
+                    continue; // This drops the stream, which gets instantly reset due to so_linger = 0
+                }
+            }
             count.fetch_add(1, Ordering::Relaxed);
-            app.read().unwrap().contotal.fetch_add(1, Ordering::Relaxed);
             let mut logentry = LogEntry::from(local, peer);
 
             let app = app.clone();
